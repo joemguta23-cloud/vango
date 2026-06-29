@@ -1,4 +1,5 @@
 'use client'
+export const dynamic = 'force-dynamic'
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Nav from '@/components/Nav'
@@ -6,11 +7,11 @@ import { createSupabaseBrowserClient } from '@/lib/supabase'
 import type { Job, JobStatusEvent } from '@/types'
 
 const STATUS_LABELS: Record<string, { label: string; icon: string; msg: string }> = {
-  pending:   { label: 'Finding driver', icon: '🔍', msg: 'We\'re matching you with the nearest available driver...' },
-  accepted:  { label: 'Driver on the way', icon: '🚐', msg: 'Your driver has accepted and is heading to the seller.' },
-  picked_up: { label: 'Item collected', icon: '📦', msg: 'Your item has been picked up and is on its way to you.' },
-  delivered: { label: 'Delivered!', icon: '✅', msg: '🎉 Your item has been delivered. Please pay the driver the agreed cash amount.' },
-  cancelled: { label: 'Cancelled', icon: '❌', msg: 'This job was cancelled.' },
+  pending:   { label: 'Finding driver', icon: 'ð', msg: 'We\'re matching you with the nearest available driver...' },
+  accepted:  { label: 'Driver on the way', icon: 'ð', msg: 'Your driver has accepted and is heading to the seller.' },
+  picked_up: { label: 'Item collected', icon: 'ð¦', msg: 'Your item has been picked up and is on its way to you.' },
+  delivered: { label: 'Delivered!', icon: 'â', msg: 'ð Your item has been delivered. Please pay the driver the agreed cash amount.' },
+  cancelled: { label: 'Cancelled', icon: 'â', msg: 'This job was cancelled.' },
 }
 
 const STATUS_ORDER = ['pending', 'accepted', 'picked_up', 'delivered']
