@@ -1,0 +1,468 @@
+'use client'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import Nav from '@/components/Nav'
+import { createSupabaseBrowserClient } from '@/lib/supabase'
+import { calculatePrice, DISTANCE_ZONE_LABELS, SERVICE_FEE } from '@/lib/pricing'
+import type { ItemSize, JobItem, DistanceZone } from '@/types'
+
+// ── Item catalogue ────────────────────────────────────────────────────────────
+const ITEM_TYPES = [
+  { icon:'🧊', name:'Fridge' },      { icon:'🫧', name:'Washer/Dryer' },
+  { icon:'🛏️', name:'Mattress' },    { icon:'🛋️', name:'Couch' },
+  { icon:'🖥️', name:'TV/Desk' },     { icon:'🚪', name:'Wardrobe' },
+  { icon:'🪑', name:'Dining Table' }, { icon:'🏋️', name:'Gym Equipment' },
+  { icon:'🔧', name:'Tools' },        { icon:'🌿', name:'Garden' },
+  { icon:'🧱', name:'Materials' },    { icon:'📦', name:'Other' },
+]
+
+const ITEM_ICON: Record<string, string> = Object.fromEntries(ITEM_TYPES.map(i => [i.name, i.icon]))
+
+const SIZES: { key: ItemSize; name: string; desc: string }[] = [
+  { key: 'medium', name: 'Medium', desc: 'e.g. TV, desk chair' },
+  { key: 'large',  name: 'Large',  desc: 'e.g. fridge, couch' },
+  { key: 'xlarge', name: 'X-Large', desc: 'e.g. piano, spa bath' },
+]
+
+// ── Blank item template ───────────────────────────────────────────────────────
+const blankItem = (): JobItem & { _photoFile?: File; _photoPreview?: string } => ({
+  item_type: '', item_size: 'large', description: '', photo_url: null,
+})
+
+type DraftItem = JobItem & { _photoFile?: File; _photoPreview?: string }
+
+export default function PostJobPage() {
+  const router = useRouter()
+  const supabase = createSupabaseBrowserClient()
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [step, setStep] = useState(1)
+  const [items, setItems] = useState<DraftItem[]>([blankItem()])
+  const [editingItem, setEditingItem] = useState(0) // which item is being configured
+
+  // Helper arrangements (buyer-side)
+  const [helperAtPickup, setHelperAtPickup] = useState(false)
+  const [helperAtDropoff, setHelperAtDropoff] = useState(false)
+  const [helperNote, setHelperNote] = useState('')
+
+  // Location + schedule
+  const [pickup, setPickup] = useState('')
+  const [dropoff, setDropoff] = useState('')
+  const [distanceZone, setDistanceZone] = useState<DistanceZone>('under_15')
+  const [schedule, setSchedule] = useState<'asap' | 'scheduled'>('asap')
+  const [scheduledFor, setScheduledFor] = useState('')
+
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  const currentItem = items[editingItem]
+  const setCurrentItem = (patch: Partial<DraftItem>) =>
+    setItems(prev => prev.map((it, i) => i === editingItem ? { ...it, ...patch } : it))
+
+  const addItem = () => {
+    setItems(prev => [...prev, blankItem()])
+    setEditingItem(items.length)
+  }
+
+  const removeItem = (idx: number) => {
+    setItems(prev => prev.filter((_, i) => i !== idx))
+    setEditingItem(Math.max(0, editingItem - 1))
+  }
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setCurrentItem({ _photoFile: file, _photoPreview: URL.createObjectURL(file) })
+  }
+
+  // Pricing preview
+  const priceItems = items.map(it => ({ size: it.item_size, label: `${it.item_type || 'Item'} (${it.item_size})` }))
+  const price = calculatePrice(priceItems, distanceZone)
+
+  // Validation
+  const item1Valid = currentItem.item_type && currentItem.description
+  const allItemsFilled = items.every(it => it.item_type && it.description)
+  const locationValid = pickup && dropoff
+
+  // ── Submit ─────────────────────────────────────────────────────────────────
+  const handleSubmit = async () => {
+    setLoading(true)
+    setError('')
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { router.push('/login'); return }
+
+    // Upload photos
+    const hydratedItems: JobItem[] = await Promise.all(items.map(async (it) => {
+      let photo_url = null
+      if (it._photoFile) {
+        const ext = it._photoFile.name.split('.').pop()
+        const path = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        const { data: up } = await supabase.storage.from('job-photos').upload(path, it._photoFile)
+        if (up) {
+          const { data: { publicUrl } } = supabase.storage.from('job-photos').getPublicUrl(path)
+          photo_url = publicUrl
+        }
+      }
+      return { item_type: it.item_type, item_size: it.item_size, description: it.description, photo_url }
+    }))
+
+    const first = hydratedItems[0]
+
+    const { data: job, error: jobErr } = await supabase.from('jobs').insert({
+      buyer_id: user.id,
+      items: hydratedItems,
+      // Legacy fields from first item
+      item_type: first.item_type,
+      item_size: first.item_size,
+      item_description: first.description,
+      photo_url: first.photo_url,
+      // Helper info
+      helper_at_pickup: helperAtPickup,
+      helper_at_dropoff: helperAtDropoff,
+      helper_note: helperNote || null,
+      // Location (lat/lng stubbed — replace with geocoding API later)
+      pickup_address: pickup,
+      pickup_lat: -37.9890,
+      pickup_lng: 145.2175,
+      dropoff_address: dropoff,
+      dropoff_lat: -37.8136,
+      dropoff_lng: 144.9631,
+      distance_zone: distanceZone,
+      scheduled_for: schedule === 'scheduled' ? scheduledFor : null,
+      status: 'pending',
+      driver_fee: price.driverFee,
+      service_fee: price.serviceFee,
+    }).select().single()
+
+    if (jobErr) { setError(jobErr.message); setLoading(false); return }
+
+    await supabase.from('job_status_events').insert({
+      job_id: job.id, status: 'pending', note: 'Job posted — finding driver',
+    })
+
+    router.push(`/buyer/tracking/${job.id}`)
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div>
+      <Nav />
+      <div className="max-w-xl mx-auto px-4 pt-24 pb-16">
+        <h1 className="text-2xl font-black mb-1">Post a delivery job</h1>
+        <p className="text-slate-500 text-sm mb-6">
+          {step === 1 && 'What items do you need delivered?'}
+          {step === 2 && 'Helper arrangements & schedule'}
+          {step === 3 && 'Pickup & dropoff addresses'}
+        </p>
+
+        {/* Progress */}
+        <div className="flex gap-2 mb-8">
+          {[1,2,3].map(s => (
+            <div key={s} className={`h-1 flex-1 rounded-full transition-colors ${
+              s < step ? 'bg-green-500' : s === step ? 'bg-orange-500' : 'bg-slate-200'
+            }`} />
+          ))}
+        </div>
+
+        {/* ── STEP 1: Items ──────────────────────────────────────────────── */}
+        {step === 1 && (
+          <div className="space-y-5">
+            {/* Item tabs when multiple */}
+            {items.length > 1 && (
+              <div className="flex gap-2 flex-wrap">
+                {items.map((it, i) => (
+                  <button key={i} onClick={() => setEditingItem(i)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold border transition-all ${
+                      editingItem === i
+                        ? 'bg-orange-500 text-white border-orange-500'
+                        : 'bg-white text-slate-600 border-slate-200 hover:border-orange-300'
+                    }`}>
+                    {ITEM_ICON[it.item_type] || '📦'} Item {i + 1}
+                    {items.length > 1 && i > 0 && (
+                      <span onClick={e => { e.stopPropagation(); removeItem(i) }}
+                        className="ml-1 text-xs opacity-60 hover:opacity-100">×</span>
+                    )}
+                  </button>
+                ))}
+                <button onClick={addItem}
+                  className="px-3 py-1.5 rounded-full text-sm font-semibold border-2 border-dashed border-orange-300 text-orange-500 hover:bg-orange-50 transition-all">
+                  + Add another item
+                </button>
+              </div>
+            )}
+
+            {/* Item type picker */}
+            <div>
+              <label className="label">What are you moving? *</label>
+              <div className="grid grid-cols-3 gap-2">
+                {ITEM_TYPES.map(it => (
+                  <button key={it.name} type="button"
+                    onClick={() => setCurrentItem({ item_type: it.name })}
+                    className={`border-2 rounded-xl py-3 px-2 text-center transition-all ${
+                      currentItem.item_type === it.name
+                        ? 'border-orange-500 bg-orange-50'
+                        : 'border-slate-200 hover:border-orange-300 bg-white'
+                    }`}>
+                    <div className="text-2xl mb-1">{it.icon}</div>
+                    <div className="text-xs font-semibold text-slate-700">{it.name}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Size */}
+            <div>
+              <label className="label">How big is it? *</label>
+              <div className="flex gap-2">
+                {SIZES.map(s => (
+                  <button key={s.key} type="button"
+                    onClick={() => setCurrentItem({ item_size: s.key })}
+                    className={`flex-1 border-2 rounded-xl py-3 px-2 text-center transition-all ${
+                      currentItem.item_size === s.key
+                        ? 'border-orange-500 bg-orange-50'
+                        : 'border-slate-200 hover:border-orange-300 bg-white'
+                    }`}>
+                    <div className="font-bold text-sm text-slate-800">{s.name}</div>
+                    <div className="text-xs text-slate-500 mt-0.5">{s.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Description */}
+            <div>
+              <label className="label">Describe the item *</label>
+              <textarea className="input resize-none" rows={2}
+                placeholder={`e.g. "Samsung fridge 180cm, white, working. Narrow hallway at pickup."`}
+                value={currentItem.description}
+                onChange={e => setCurrentItem({ description: e.target.value })} />
+            </div>
+
+            {/* Photo */}
+            <div>
+              <label className="label">Photo (optional but recommended)</label>
+              {!currentItem._photoPreview ? (
+                <label className="border-2 border-dashed border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl p-8 flex flex-col items-center cursor-pointer transition-all bg-slate-50">
+                  <span className="text-3xl mb-2">📷</span>
+                  <span className="text-sm text-slate-500"><strong className="text-orange-500">Tap to upload</strong> · helps driver prepare</span>
+                  <input type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
+                </label>
+              ) : (
+                <div className="relative rounded-xl overflow-hidden h-36 bg-slate-100">
+                  <img src={currentItem._photoPreview} alt="Preview" className="w-full h-full object-cover" />
+                  <button onClick={() => setCurrentItem({ _photoFile: undefined, _photoPreview: undefined })}
+                    className="absolute top-2 right-2 w-7 h-7 bg-black/50 text-white rounded-full flex items-center justify-center text-sm">×</button>
+                </div>
+              )}
+            </div>
+
+            {/* Add item prompt (first item only, below form) */}
+            {items.length === 1 && (
+              <button onClick={addItem}
+                className="w-full border-2 border-dashed border-orange-200 rounded-xl py-3 text-sm font-semibold text-orange-500 hover:bg-orange-50 hover:border-orange-400 transition-all">
+                + Add another item to this job (saves money!)
+              </button>
+            )}
+
+            {/* Multi-item savings callout */}
+            {items.length > 1 && (
+              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800">
+                <span className="font-bold">💚 Multi-item discount active:</span> your 2nd+ items are 30% cheaper because the driver is already making the trip.
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => router.push('/')} className="btn-secondary flex-1 justify-center">← Back</button>
+              <button onClick={() => setStep(2)} disabled={!allItemsFilled}
+                className="btn-primary flex-[2] justify-center disabled:opacity-50">
+                Continue →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP 2: Helpers & schedule ──────────────────────────────────── */}
+        {step === 2 && (
+          <div className="space-y-6">
+
+            {/* Helper arrangements */}
+            <div>
+              <label className="label">Can you arrange help for the heavy lifting?</label>
+              <p className="text-xs text-slate-500 mb-3">
+                Your VanGo driver comes solo — they don't bring a partner. For heavy items, having someone at either end makes the job safer and faster. This is your responsibility to arrange (a friend, family member, the seller, etc.).
+              </p>
+
+              <div className="space-y-3">
+                {/* Pickup helper */}
+                <label className="flex items-start gap-3 cursor-pointer p-3.5 rounded-xl border-2 border-slate-200 hover:border-orange-300 transition-colors has-[:checked]:border-orange-500 has-[:checked]:bg-orange-50">
+                  <input
+                    type="checkbox"
+                    checked={helperAtPickup}
+                    onChange={e => setHelperAtPickup(e.target.checked)}
+                    className="w-5 h-5 accent-orange-500 mt-0.5 flex-shrink-0"
+                  />
+                  <div>
+                    <div className="font-semibold text-slate-800 text-sm">✅ Someone will be at the <span className="text-green-600">pickup address</span> to help carry</div>
+                    <div className="text-xs text-slate-500 mt-0.5">e.g. the seller, a friend who's already there</div>
+                  </div>
+                </label>
+
+                {/* Dropoff helper */}
+                <label className="flex items-start gap-3 cursor-pointer p-3.5 rounded-xl border-2 border-slate-200 hover:border-orange-300 transition-colors has-[:checked]:border-orange-500 has-[:checked]:bg-orange-50">
+                  <input
+                    type="checkbox"
+                    checked={helperAtDropoff}
+                    onChange={e => setHelperAtDropoff(e.target.checked)}
+                    className="w-5 h-5 accent-orange-500 mt-0.5 flex-shrink-0"
+                  />
+                  <div>
+                    <div className="font-semibold text-slate-800 text-sm">✅ Someone will be at the <span className="text-orange-600">dropoff address</span> to help receive it</div>
+                    <div className="text-xs text-slate-500 mt-0.5">e.g. yourself, a housemate, a family member</div>
+                  </div>
+                </label>
+              </div>
+
+              {/* Warning if no help ticked for a large item */}
+              {items.some(it => it.item_size !== 'medium') && !helperAtPickup && !helperAtDropoff && (
+                <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-800">
+                  ⚠️ <strong>Heads up:</strong> You've selected a large/heavy item. Drivers may decline jobs where no help is available at either end. Ticking one or both boxes significantly improves your match speed.
+                </div>
+              )}
+
+              {/* Optional helper note */}
+              {(helperAtPickup || helperAtDropoff) && (
+                <div className="mt-3">
+                  <label className="label">Helper note (optional)</label>
+                  <input className="input" placeholder='e.g. "My brother will be at pickup, my wife at dropoff"'
+                    value={helperNote} onChange={e => setHelperNote(e.target.value)} />
+                </div>
+              )}
+            </div>
+
+            {/* Schedule */}
+            <div>
+              <label className="label">When do you need it?</label>
+              <div className="flex gap-2">
+                {[{key:'asap',title:'⚡ ASAP',sub:'Match within minutes'},{key:'scheduled',title:'📅 Schedule',sub:'Pick date & time'}].map(s => (
+                  <button key={s.key} type="button" onClick={() => setSchedule(s.key as any)}
+                    className={`flex-1 border-2 rounded-xl py-3 px-3 text-left transition-all ${
+                      schedule === s.key ? 'border-orange-500 bg-orange-50' : 'border-slate-200 bg-white hover:border-orange-300'
+                    }`}>
+                    <div className="font-bold text-sm">{s.title}</div>
+                    <div className="text-xs text-slate-500 mt-0.5">{s.sub}</div>
+                  </button>
+                ))}
+              </div>
+              {schedule === 'scheduled' && (
+                <input type="datetime-local" className="input mt-3"
+                  value={scheduledFor} onChange={e => setScheduledFor(e.target.value)} />
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => setStep(1)} className="btn-secondary flex-1 justify-center">← Back</button>
+              <button onClick={() => setStep(3)} className="btn-primary flex-[2] justify-center">Continue →</button>
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP 3: Addresses + price ───────────────────────────────────── */}
+        {step === 3 && (
+          <div className="space-y-5">
+            {/* Addresses */}
+            <div>
+              <label className="label">Pickup & Dropoff *</label>
+              <div className="flex gap-3 items-start">
+                <div className="flex flex-col items-center pt-3.5 gap-1">
+                  <div className="w-3 h-3 rounded-full bg-green-500" />
+                  <div className="w-0.5 h-6 bg-slate-200" />
+                  <div className="w-3 h-3 rounded-full bg-orange-500" />
+                </div>
+                <div className="flex-1 space-y-2">
+                  <input className="input" placeholder="Pickup: seller's full address + suburb + postcode"
+                    value={pickup} onChange={e => setPickup(e.target.value)} required />
+                  <input className="input" placeholder="Dropoff: your delivery address + suburb + postcode"
+                    value={dropoff} onChange={e => setDropoff(e.target.value)} required />
+                </div>
+              </div>
+            </div>
+
+            {/* Distance zone */}
+            <div>
+              <label className="label">Approximate distance between pickup and dropoff *</label>
+              <p className="text-xs text-slate-400 mb-2">Used for pricing. Automatic calculation coming soon.</p>
+              <div className="space-y-2">
+                {(Object.entries(DISTANCE_ZONE_LABELS) as [DistanceZone, string][]).map(([key, label]) => (
+                  <label key={key} className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                    distanceZone === key ? 'border-orange-500 bg-orange-50' : 'border-slate-200 hover:border-orange-300'
+                  }`}>
+                    <input type="radio" name="zone" value={key} checked={distanceZone === key}
+                      onChange={() => setDistanceZone(key)} className="accent-orange-500" />
+                    <span className="text-sm font-medium text-slate-700">{label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Access notes */}
+            <div>
+              <label className="label">Access notes (optional)</label>
+              <input className="input" placeholder="e.g. Driveway available, ground floor, narrow front door" />
+            </div>
+
+            {/* Price breakdown */}
+            {locationValid && (
+              <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+                <div className="text-sm font-bold text-orange-800 mb-3">💰 Price breakdown</div>
+                <div className="space-y-1.5 text-sm">
+                  {price.items.map((item, i) => (
+                    <div key={i} className="flex justify-between items-center">
+                      <span className="text-orange-700">
+                        {item.label}
+                        {item.discounted && <span className="ml-1 text-xs text-green-600 font-semibold">(30% multi-item discount)</span>}
+                      </span>
+                      <span className="font-bold">${item.fee}</span>
+                    </div>
+                  ))}
+                  {price.distanceSurcharge > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-orange-700">Distance charge</span>
+                      <span className="font-bold">+${price.distanceSurcharge}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-orange-700">VanGo service fee</span>
+                    <span className="font-bold">${price.serviceFee}</span>
+                  </div>
+                  <div className="h-px bg-orange-200 my-2" />
+                  <div className="flex justify-between font-black text-base">
+                    <span>Total</span>
+                    <span className="text-orange-600">${price.total}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-orange-600">
+                    <span>Driver receives (cash on delivery)</span>
+                    <span className="font-bold">${price.driverFee}</span>
+                  </div>
+                </div>
+                <p className="text-xs text-orange-600 mt-3">
+                  Pay <strong>${price.driverFee} cash</strong> to driver on delivery. The $12 service fee is charged to your card when you post.
+                </p>
+              </div>
+            )}
+
+            {error && <p className="text-red-500 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
+
+            <div className="flex gap-3">
+              <button onClick={() => setStep(2)} className="btn-secondary flex-1 justify-center">← Back</button>
+              <button onClick={handleSubmit} disabled={!locationValid || loading}
+                className="btn-primary flex-[2] justify-center disabled:opacity-50">
+                {loading ? 'Posting…' : `🚐 Find a Driver — $${price.total}`}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
