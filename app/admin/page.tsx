@@ -47,20 +47,20 @@ export default function AdminPage() {
     picked_up: 'badge-blue', delivered: 'badge-green', cancelled: 'badge-slate',
   }
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="text-5xl animate-bounce">âï¸</div></div>
+  if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="text-5xl animate-bounce">⚙️</div></div>
 
   return (
     <div className="flex min-h-screen">
       <aside className="w-56 bg-slate-900 min-h-screen fixed left-0 top-0 flex flex-col py-6 z-50">
         <div className="px-5 pb-5 border-b border-white/10 mb-4 flex items-center gap-2 font-black text-white text-lg">
-          <span className="w-7 h-7 bg-orange-500 rounded-lg flex items-center justify-center text-sm">ð</span>
+          <span className="w-7 h-7 bg-orange-500 rounded-lg flex items-center justify-center text-sm">🚐</span>
           Van<span className="text-orange-500">Go</span>
           <span className="text-xs text-slate-500 font-normal">Admin</span>
         </div>
         {[
-          { icon: 'ð¦', label: 'All Jobs', t: 'jobs' },
-          { icon: 'ð', label: 'Drivers', t: 'drivers' },
-          { icon: 'â³', label: `Pending ${pendingDrivers.length > 0 ? `(${pendingDrivers.length})` : ''}`, t: 'pending' },
+          { icon: '📦', label: 'All Jobs', t: 'jobs' },
+          { icon: '🚐', label: 'Drivers', t: 'drivers' },
+          { icon: '⏳', label: `Pending ${pendingDrivers.length > 0 ? `(${pendingDrivers.length})` : ''}`, t: 'pending' },
         ].map(item => (
           <button key={item.t} onClick={() => setTab(item.t as any)}
             className={`flex items-center gap-3 px-5 py-2.5 text-sm font-medium text-left transition-all ${
@@ -73,7 +73,7 @@ export default function AdminPage() {
           </button>
         ))}
         <div className="flex-1" />
-        <Link href="/" className="flex items-center gap-3 px-5 py-2.5 text-sm text-slate-400 hover:text-white transition-colors">â Back to site</Link>
+        <Link href="/" className="flex items-center gap-3 px-5 py-2.5 text-sm text-slate-400 hover:text-white transition-colors">← Back to site</Link>
       </aside>
 
       <main className="ml-56 flex-1 p-8 bg-slate-50 min-h-screen">
@@ -84,10 +84,10 @@ export default function AdminPage() {
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
           {[
-            { icon: 'ð¦', bg: 'bg-orange-50', num: activeJobs.length, label: 'Active Jobs' },
-            { icon: 'ð', bg: 'bg-green-50',  num: onlineDrivers.length, label: 'Drivers Online' },
-            { icon: 'ð°', bg: 'bg-blue-50',   num: `$${todayFees.toFixed(2)}`, label: 'Fees Today' },
-            { icon: 'â³', bg: 'bg-red-50',    num: pendingDrivers.length, label: 'Awaiting Approval' },
+            { icon: '📦', bg: 'bg-orange-50', num: activeJobs.length, label: 'Active Jobs' },
+            { icon: '🚐', bg: 'bg-green-50',  num: onlineDrivers.length, label: 'Drivers Online' },
+            { icon: '💰', bg: 'bg-blue-50',   num: `$${todayFees.toFixed(2)}`, label: 'Fees Today' },
+            { icon: '⏳', bg: 'bg-red-50',    num: pendingDrivers.length, label: 'Awaiting Approval' },
           ].map(s => (
             <div key={s.label} className="bg-white rounded-2xl border border-slate-200 p-5 flex items-center gap-4">
               <div className={`w-12 h-12 ${s.bg} rounded-xl flex items-center justify-center text-2xl flex-shrink-0`}>{s.icon}</div>
@@ -101,7 +101,7 @@ export default function AdminPage() {
           <div className="space-y-4">
             <h2 className="font-bold text-lg">Drivers awaiting approval</h2>
             {pendingDrivers.length === 0 ? (
-              <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-400">All drivers approved â</div>
+              <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-400">All drivers approved ✓</div>
             ) : pendingDrivers.map(d => (
               <div key={d.id} className="bg-white rounded-2xl border border-slate-200 p-5 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
@@ -110,8 +110,8 @@ export default function AdminPage() {
                   </div>
                   <div>
                     <div className="font-bold">{d.profile?.full_name}</div>
-                    <div className="text-sm text-slate-500">{d.profile?.phone} Â· ABN: {d.abn || 'â'} Â· Licence: {d.license_number || 'â'}|/div>
-                    <div className="text-sm text-slate-500">ð {d.vehicle_type} â {d.vehicle_make} {d.vehicle_model} Â· {d.vehicle_plate}</div>
+                    <div className="text-sm text-slate-500">{d.profile?.phone} · ABN: {d.abn || '—'} · Licence: {d.license_number || '—'}|/div>
+                    <div className="text-sm text-slate-500">🚐 {d.vehicle_type} — {d.vehicle_make} {d.vehicle_model} · {d.vehicle_plate}</div>
                   </div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
@@ -119,7 +119,7 @@ export default function AdminPage() {
                     Reject
                   </button>
                   <button onClick={() => approve(d.id)} className="px-4 py-2 rounded-xl bg-green-500 text-white text-sm font-semibold hover:bg-green-600 transition-all">
-                    â Approve
+                    ✓ Approve
                   </button>
                 </div>
               </div>
@@ -145,7 +145,7 @@ export default function AdminPage() {
                   {jobs.map(j => (
                     <tr key={j.id} className="border-b border-slate-50 hover:bg-slate-50">
                       <td className="px-5 py-3.5 font-semibold">{j.item_type}</td>
-                      <td className="px-5 py-3.5 text-slate-500 text-xs">{j.pickup_address?.split(',')[1]?.trim()} â {j.dropoff_address?.split(',')[1]?.trim()}</td>
+                      <td className="px-5 py-3.5 text-slate-500 text-xs">{j.pickup_address?.split(',')[1]?.trim()} → {j.dropoff_address?.split(',')[1]?.trim()}</td>
                       <td className="px-5 py-3.5 font-medium">{(j.driver as any)?.profile?.full_name ?? <span className="text-slate-400 italic">Unassigned</span>}</td>
                       <td className="px-5 py-3.5"><span className={STATUS_BADGE[j.status] ?? 'badge-slate'}>{j.status.replace('_',' ')}</span></td>
                       <td className="px-5 py-3.5 font-bold">${j.service_fee}</td>
@@ -184,12 +184,12 @@ export default function AdminPage() {
                           <span className="font-semibold">{d.profile?.full_name}</span>
                         </div>
                       </td>
-                      <td className="px-5 py-3.5 text-slate-500">ð {d.vehicle_make} {d.vehicle_model} Â· {d.vehicle_plate}</td>
-                      <td className="px-5 py-3.5 text-slate-500">{d.abn || 'â'}</td>
-                      <td className="px-5 py-3.5">{d.is_online ? <span className="badge-green">â Online</span> : <span className="badge-slate">Offline</span>}</td>
+                      <td className="px-5 py-3.5 text-slate-500">🚐 {d.vehicle_make} {d.vehicle_model} · {d.vehicle_plate}</td>
+                      <td className="px-5 py-3.5 text-slate-500">{d.abn || '—'}</td>
+                      <td className="px-5 py-3.5">{d.is_online ? <span className="badge-green">● Online</span> : <span className="badge-slate">Offline</span>}</td>
                       <td className="px-5 py-3.5 font-semibold">{d.total_jobs}</td>
-                      <td className="px-5 py-3.5">{d.stripe_onboarded ? <span className="badge-green">â Connected</span> : <span className="badge-orange">Pending</span>}</td>
-                      <td className="px-5 py-3.5"><span className="text-yellow-600 font-bold">â­ {d.rating}</span></td>
+                      <td className="px-5 py-3.5">{d.stripe_onboarded ? <span className="badge-green">✓ Connected</span> : <span className="badge-orange">Pending</span>}</td>
+                      <td className="px-5 py-3.5"><span className="text-yellow-600 font-bold">⭐ {d.rating}</span></td>
                     </tr>
                   ))}
                   {approvedDrivers.length === 0 && <tr><td colSpan={7} className="px-5 py-10 text-center text-slate-400">No approved drivers yet</td></tr>}
