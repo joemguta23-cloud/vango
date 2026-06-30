@@ -28,27 +28,27 @@ export default function ConnectReturnPage() {
       <div className="max-w-lg mx-auto px-4 pt-24 pb-12 text-center">
         {status === 'checking' && (
           <div>
-            <div className="text-5xl mb-4">â³</div>
-            <h1 className="text-2xl font-black mb-2">Checking your accountâ¦</h1>
+            <div className="text-5xl mb-4">⏳</div>
+            <h1 className="text-2xl font-black mb-2">Checking your account…</h1>
           </div>
         )}
         {status === 'success' && (
           <div>
-            <div className="text-5xl mb-4">ð</div>
+            <div className="text-5xl mb-4">🎉</div>
             <h1 className="text-2xl font-black mb-2">You're all set!</h1>
             <p className="text-slate-500 mb-6">Your bank account is connected. You'll be paid automatically after each delivery.</p>
             <button onClick={() => router.push('/driver/dashboard')} className="btn-primary">
-              Go to dashboard â
+              Go to dashboard →
             </button>
           </div>
         )}
         {status === 'incomplete' && (
           <div>
-            <div className="text-5xl mb-4">â ï¸</div>
+            <div className="text-5xl mb-4">⚠️</div>
             <h1 className="text-2xl font-black mb-2">Setup incomplete</h1>
             <p className="text-slate-500 mb-6">Stripe needs a bit more information to verify your account.</p>
             <button onClick={() => router.push('/driver/onboard')} className="btn-primary">
-              Complete setup â
+              Complete setup →
             </button>
           </div>
         )}
