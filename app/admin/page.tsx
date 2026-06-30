@@ -110,7 +110,7 @@ export default function AdminPage() {
                   </div>
                   <div>
                     <div className="font-bold">{d.profile?.full_name}</div>
-                    <div className="text-sm text-slate-500">{d.profile?.phone} · ABN: {d.abn || '—'} · Licence: {d.license_number || '—'}|/div>
+                    <div className="text-sm text-slate-500">{d.profile?.phone} · ABN: {d.abn || '—'} · Licence: {d.license_number || '—'}</div>
                     <div className="text-sm text-slate-500">🚐 {d.vehicle_type} — {d.vehicle_make} {d.vehicle_model} · {d.vehicle_plate}</div>
                   </div>
                 </div>
