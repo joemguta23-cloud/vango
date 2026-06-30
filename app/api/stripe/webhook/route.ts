@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
+import { stripe } from '@/lib/stripe'
 import { createSupabaseAdminClient } from '@/lib/supabase'
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-06-20',
-})
+import { notifyUser } from '@/lib/notify'
 
 export async function POST(req: NextRequest) {
   const body = await req.text()
@@ -23,13 +21,50 @@ export async function POST(req: NextRequest) {
   if (event.type === 'payment_intent.succeeded') {
     const pi = event.data.object as Stripe.PaymentIntent
     const jobId = pi.metadata?.job_id
-    if (jobId) {
+    if (!jobId) return NextResponse.json({ received: true })
+
+    // Fetch job + driver details
+    const { data: job } = await supabase
+      .from('jobs')
+      .select('id, driver_id, buyer_id, driver_fee, drivers(stripe_account_id, stripe_onboarded)')
+      .eq('id', jobId)
+      .single()
+
+    if (job) {
+      // Update job with payment intent ID
       await supabase.from('jobs').update({ stripe_payment_intent_id: pi.id }).eq('id', jobId)
       await supabase.from('job_status_events').insert({
         job_id: jobId,
         status: 'payment_confirmed',
         note: `Payment of $${(pi.amount / 100).toFixed(2)} confirmed`,
       })
+
+      // Auto-transfer driver fee if driver has Connect account
+      const driver = Array.isArray(job.drivers) ? job.drivers[0] : job.drivers as any
+      if (driver?.stripe_account_id && driver?.stripe_onboarded) {
+        const driverFeeCents = Math.round(Number(job.driver_fee) * 100)
+        try {
+          await stripe.transfers.create({
+            amount: driverFeeCents,
+            currency: 'aud',
+            destination: driver.stripe_account_id,
+            transfer_group: jobId,
+            metadata: { job_id: jobId },
+          })
+        } catch (transferErr: any) {
+          console.error('Transfer failed:', transferErr.message)
+        }
+      }
+
+      // Notify buyer
+      if (job.buyer_id) {
+        await notifyUser(supabase, {
+          userId: job.buyer_id,
+          title: '✅ Payment confirmed',
+          body: `Your payment of $${(pi.amount / 100).toFixed(2)} was received. Job is on its way!`,
+          url: `/buyer/tracking/${jobId}`,
+        })
+      }
     }
   }
 
