@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     // Fetch job + driver details
     const { data: job } = await supabase
       .from('jobs')
-      .select('id, driver_id, buyer_id, driver_fee, drivers(stripe_account_id, stripe_onboarded)')
+      .select('id, driver_id, buyer_id, driver_fee, discount_code_id, drivers(stripe_account_id, stripe_onboarded)')
       .eq('id', jobId)
       .single()
 
@@ -38,6 +38,27 @@ export async function POST(req: NextRequest) {
         status: 'payment_confirmed',
         note: `Payment of $${(pi.amount / 100).toFixed(2)} confirmed`,
       })
+
+      // Feature-flagged cancellation policy: this payment included any
+      // outstanding $2 cancellation fees (see create-checkout-session/route.ts)
+      // -- mark those cancelled jobs as charged now that payment succeeded.
+      const owedJobIds = (pi.metadata?.owed_job_ids || '').split(',').filter(Boolean)
+      if (owedJobIds.length) {
+        await supabase.from('jobs').update({ cancellation_fee_charged: true }).in('id', owedJobIds)
+      }
+
+      // Feature-flagged discount codes: count this use now that payment
+      // (or the no-charge full-waiver path) has actually gone through.
+      if (job.discount_code_id) {
+        const { data: dc } = await supabase
+          .from('discount_codes')
+          .select('uses_count')
+          .eq('id', job.discount_code_id)
+          .single()
+        if (dc) {
+          await supabase.from('discount_codes').update({ uses_count: dc.uses_count + 1 }).eq('id', job.discount_code_id)
+        }
+      }
 
       // Auto-transfer driver fee if driver has Connect account
       const driver = Array.isArray(job.drivers) ? job.drivers[0] : job.drivers as any
