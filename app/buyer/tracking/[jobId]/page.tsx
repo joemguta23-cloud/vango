@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Nav from '@/components/Nav'
+import MessageThread from '@/components/MessageThread'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
 import { FEATURE_FLAGS } from '@/lib/featureFlags'
 
@@ -193,7 +194,7 @@ export default function TrackingPage() {
             </div>
             <div className="flex gap-2 mt-4">
               <a href={`tel:${job.driver.profile?.phone}`} className="flex-1 bg-green-100 text-green-700 font-semibold py-2.5 rounded-xl text-sm text-center hover:bg-green-200 transition-colors">📞 Call driver</a>
-              <button className="flex-1 bg-blue-100 text-blue-700 font-semibold py-2.5 rounded-xl text-sm hover:bg-blue-200 transition-colors">💬 Message</button>
+              <button onClick={() => setShowMessages(true)} className="flex-1 bg-blue-100 text-blue-700 font-semibold py-2.5 rounded-xl text-sm hover:bg-blue-200 transition-colors">💬 Message</button>
             </div>
           </div>
         )}
@@ -241,6 +242,7 @@ export default function TrackingPage() {
           </div>
         )}
       </div>
+      {showMessages && <MessageThread jobId={jobId} onClose={() => setShowMessages(false)} />}
     </div>
   )
 }
