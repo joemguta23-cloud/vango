@@ -7,25 +7,25 @@ import { createSupabaseBrowserClient } from '@/lib/supabase'
 import { calculatePrice, DISTANCE_ZONE_LABELS, SERVICE_FEE } from '@/lib/pricing'
 import type { ItemSize, JobItem, DistanceZone } from '@/types'
 
-// ââ Item catalogue ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// -- Item catalogue --------------------------------------------------------
 const ITEM_TYPES = [
-  { icon:'ð§', name:'Fridge' },      { icon:'ð«§', name:'Washer/Dryer' },
-  { icon:'ðï¸', name:'Mattress' },    { icon:'ðï¸', name:'Couch' },
-  { icon:'ð¥ï¸', name:'TV/Desk' },     { icon:'ðª', name:'Wardrobe' },
-  { icon:'ðª', name:'Dining Table' }, { icon:'ðï¸', name:'Gym Equipment' },
-  { icon:'ð§', name:'Tools' },        { icon:'ð¿', name:'Garden' },
-  { icon:'ð§±', name:'Materials' },    { icon:'ð¦', name:'Other' },
+  { icon:'🧊', name:'Fridge' }, { icon:'🌀', name:'Washer/Dryer' },
+  { icon:'🛏️', name:'Mattress' }, { icon:'🛋️', name:'Couch' },
+  { icon:'🖥️', name:'TV/Desk' }, { icon:'🚪', name:'Wardrobe' },
+  { icon:'🍽️', name:'Dining Table' }, { icon:'🏋️', name:'Gym Equipment' },
+  { icon:'🧰', name:'Tools' }, { icon:'🌿', name:'Garden' },
+  { icon:'🧱', name:'Materials' }, { icon:'📦', name:'Other' },
 ]
 
 const ITEM_ICON: Record<string, string> = Object.fromEntries(ITEM_TYPES.map(i => [i.name, i.icon]))
 
 const SIZES: { key: ItemSize; name: string; desc: string }[] = [
   { key: 'medium', name: 'Medium', desc: 'e.g. TV, desk chair' },
-  { key: 'large',  name: 'Large',  desc: 'e.g. fridge, couch' },
+  { key: 'large', name: 'Large', desc: 'e.g. fridge, couch' },
   { key: 'xlarge', name: 'X-Large', desc: 'e.g. piano, spa bath' },
 ]
 
-// ââ Blank item template âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// -- Blank item template ----------------------------------------------------
 const blankItem = (): JobItem & { _photoFile?: File; _photoPreview?: string } => ({
   item_type: '', item_size: 'large', description: '', photo_url: null,
 })
@@ -36,7 +36,7 @@ export default function PostJobPage() {
   const router = useRouter()
   const supabase = createSupabaseBrowserClient()
 
-  // ââ State ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // -- State ------------------------------------------------------------
   const [step, setStep] = useState(1)
   const [items, setItems] = useState<DraftItem[]>([blankItem()])
   const [editingItem, setEditingItem] = useState(0) // which item is being configured
@@ -56,7 +56,7 @@ export default function PostJobPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // ââ Helpers ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // -- Helpers ------------------------------------------------------------
   const currentItem = items[editingItem]
   const setCurrentItem = (patch: Partial<DraftItem>) =>
     setItems(prev => prev.map((it, i) => i === editingItem ? { ...it, ...patch } : it))
@@ -81,12 +81,12 @@ export default function PostJobPage() {
   const priceItems = items.map(it => ({ size: it.item_size, label: `${it.item_type || 'Item'} (${it.item_size})` }))
   const price = calculatePrice(priceItems, distanceZone)
 
-  // Validation
-  const item1Valid = currentItem.item_type && currentItem.description
-  const allItemsFilled = items.every(it => it.item_type && it.description)
+  // Validation -- description is optional, only item type is required
+  const item1Valid = !!currentItem.item_type
+  const allItemsFilled = items.every(it => it.item_type)
   const locationValid = pickup && dropoff
 
-  // ââ Submit âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // -- Submit ------------------------------------------------------------
   const handleSubmit = async () => {
     setLoading(true)
     setError('')
@@ -105,7 +105,7 @@ export default function PostJobPage() {
           photo_url = publicUrl
         }
       }
-      return { item_type: it.item_type, item_size: it.item_size, description: it.description, photo_url }
+      return { item_type: it.item_type, item_size: it.item_size, description: it.description || `${it.item_type} delivery`, photo_url }
     }))
 
     const first = hydratedItems[0]
@@ -122,7 +122,7 @@ export default function PostJobPage() {
       helper_at_pickup: helperAtPickup,
       helper_at_dropoff: helperAtDropoff,
       helper_note: helperNote || null,
-      // Location (lat/lng stubbed â replace with geocoding API later)
+      // Location (lat/lng stubbed -- replace with geocoding API later)
       pickup_address: pickup,
       pickup_lat: -37.9890,
       pickup_lng: 145.2175,
@@ -139,13 +139,13 @@ export default function PostJobPage() {
     if (jobErr) { setError(jobErr.message); setLoading(false); return }
 
     await supabase.from('job_status_events').insert({
-      job_id: job.id, status: 'pending', note: 'Job posted â finding driver',
+      job_id: job.id, status: 'pending', note: 'Job posted -- finding driver',
     })
 
     router.push(`/buyer/tracking/${job.id}`)
   }
 
-  // ââ Render âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // -- Render ------------------------------------------------------------
   return (
     <div>
       <Nav />
@@ -166,7 +166,7 @@ export default function PostJobPage() {
           ))}
         </div>
 
-        {/* ââ STEP 1: Items ââââââââââââââââââââââââââââââââââââââââââââââââ */}
+        {/* -- STEP 1: Items -- */}
         {step === 1 && (
           <div className="space-y-5">
             {/* Item tabs when multiple */}
@@ -179,10 +179,10 @@ export default function PostJobPage() {
                         ? 'bg-orange-500 text-white border-orange-500'
                         : 'bg-white text-slate-600 border-slate-200 hover:border-orange-300'
                     }`}>
-                    {ITEM_ICON[it.item_type] || 'ð¦'} Item {i + 1}
+                    {ITEM_ICON[it.item_type] || '📦'} Item {i + 1}
                     {items.length > 1 && i > 0 && (
                       <span onClick={e => { e.stopPropagation(); removeItem(i) }}
-                        className="ml-1 text-xs opacity-60 hover:opacity-100">Ã</span>
+                        className="ml-1 text-xs opacity-60 hover:opacity-100">×</span>
                     )}
                   </button>
                 ))}
@@ -233,7 +233,7 @@ export default function PostJobPage() {
 
             {/* Description */}
             <div>
-              <label className="label">Describe the item *</label>
+              <label className="label">Describe the item (optional)</label>
               <textarea className="input resize-none" rows={2}
                 placeholder={`e.g. "Samsung fridge 180cm, white, working. Narrow hallway at pickup."`}
                 value={currentItem.description}
@@ -245,15 +245,15 @@ export default function PostJobPage() {
               <label className="label">Photo (optional but recommended)</label>
               {!currentItem._photoPreview ? (
                 <label className="border-2 border-dashed border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl p-8 flex flex-col items-center cursor-pointer transition-all bg-slate-50">
-                  <span className="text-3xl mb-2">ð·</span>
-                  <span className="text-sm text-slate-500"><strong className="text-orange-500">Tap to upload</strong> Â· helps driver prepare</span>
+                  <span className="text-3xl mb-2">📸</span>
+                  <span className="text-sm text-slate-500"><strong className="text-orange-500">Tap to upload</strong> · helps driver prepare</span>
                   <input type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
                 </label>
               ) : (
                 <div className="relative rounded-xl overflow-hidden h-36 bg-slate-100">
                   <img src={currentItem._photoPreview} alt="Preview" className="w-full h-full object-cover" />
                   <button onClick={() => setCurrentItem({ _photoFile: undefined, _photoPreview: undefined })}
-                    className="absolute top-2 right-2 w-7 h-7 bg-black/50 text-white rounded-full flex items-center justify-center text-sm">Ã</button>
+                    className="absolute top-2 right-2 w-7 h-7 bg-black/50 text-white rounded-full flex items-center justify-center text-sm">×</button>
                 </div>
               )}
             </div>
@@ -266,24 +266,27 @@ export default function PostJobPage() {
               </button>
             )}
 
-            {/* Multi-item savings callout */}
+            {/* Multi-item savings + ute-fit reminder */}
             {items.length > 1 && (
-              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800">
-                <span className="font-bold">ð Multi-item discount active:</span> your 2nd+ items are 30% cheaper because the driver is already making the trip.
+              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800 space-y-1.5">
+                <div><span className="font-bold">🎉 Multi-item discount active:</span> your 2nd+ items are 30% cheaper because the driver is already making the trip.</div>
+                <div className="text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 -mx-1">
+                  🚐 <strong>Heads up:</strong> all items need to fit together in the back of a single ute at the same time. Please describe how they'll be packed (e.g. stacked, disassembled) in the notes below so the driver can confirm it'll fit before accepting.
+                </div>
               </div>
             )}
 
             <div className="flex gap-3 pt-1">
-              <button onClick={() => router.push('/')} className="btn-secondary flex-1 justify-center">â Back</button>
+              <button onClick={() => router.push('/')} className="btn-secondary flex-1 justify-center">← Back</button>
               <button onClick={() => setStep(2)} disabled={!allItemsFilled}
                 className="btn-primary flex-[2] justify-center disabled:opacity-50">
-                Continue â
+                Continue →
               </button>
             </div>
           </div>
         )}
 
-        {/* ââ STEP 2: Helpers & schedule ââââââââââââââââââââââââââââââââââââ */}
+        {/* -- STEP 2: Helpers & schedule -- */}
         {step === 2 && (
           <div className="space-y-6">
 
@@ -291,7 +294,7 @@ export default function PostJobPage() {
             <div>
               <label className="label">Can you arrange help for the heavy lifting?</label>
               <p className="text-xs text-slate-500 mb-3">
-                Your VanGo driver comes solo â they don't bring a partner. For heavy items, having someone at either end makes the job safer and faster. This is your responsibility to arrange (a friend, family member, the seller, etc.).
+                Your VanGo driver comes solo -- they don't bring a partner. For heavy items, having someone at either end makes the job safer and faster. This is your responsibility to arrange (a friend, family member, the seller, etc.).
               </p>
 
               <div className="space-y-3">
@@ -304,7 +307,7 @@ export default function PostJobPage() {
                     className="w-5 h-5 accent-orange-500 mt-0.5 flex-shrink-0"
                   />
                   <div>
-                    <div className="font-semibold text-slate-800 text-sm">â Someone will be at the <span className="text-green-600">pickup address</span> to help carry</div>
+                    <div className="font-semibold text-slate-800 text-sm">✅ Someone will be at the <span className="text-green-600">pickup address</span> to help carry</div>
                     <div className="text-xs text-slate-500 mt-0.5">e.g. the seller, a friend who's already there</div>
                   </div>
                 </label>
@@ -318,7 +321,7 @@ export default function PostJobPage() {
                     className="w-5 h-5 accent-orange-500 mt-0.5 flex-shrink-0"
                   />
                   <div>
-                    <div className="font-semibold text-slate-800 text-sm">â Someone will be at the <span className="text-orange-600">dropoff address</span> to help receive it</div>
+                    <div className="font-semibold text-slate-800 text-sm">✅ Someone will be at the <span className="text-orange-600">dropoff address</span> to help receive it</div>
                     <div className="text-xs text-slate-500 mt-0.5">e.g. yourself, a housemate, a family member</div>
                   </div>
                 </label>
@@ -327,7 +330,7 @@ export default function PostJobPage() {
               {/* Warning if no help ticked for a large item */}
               {items.some(it => it.item_size !== 'medium') && !helperAtPickup && !helperAtDropoff && (
                 <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-800">
-                  â ï¸ <strong>Heads up:</strong> You've selected a large/heavy item. Drivers may decline jobs where no help is available at either end. Ticking one or both boxes significantly improves your match speed.
+                  ⚠️ <strong>Heads up:</strong> You've selected a large/heavy item. Drivers may decline jobs where no help is available at either end. Ticking one or both boxes significantly improves your match speed.
                 </div>
               )}
 
@@ -345,7 +348,7 @@ export default function PostJobPage() {
             <div>
               <label className="label">When do you need it?</label>
               <div className="flex gap-2">
-                {[{key:'asap',title:'â¡ ASAP',sub:'Match within minutes'},{key:'scheduled',title:'ð Schedule',sub:'Pick date & time'}].map(s => (
+                {[{key:'asap',title:'⚡ ASAP',sub:'Match within minutes'},{key:'scheduled',title:'📅 Schedule',sub:'Pick date & time'}].map(s => (
                   <button key={s.key} type="button" onClick={() => setSchedule(s.key as any)}
                     className={`flex-1 border-2 rounded-xl py-3 px-3 text-left transition-all ${
                       schedule === s.key ? 'border-orange-500 bg-orange-50' : 'border-slate-200 bg-white hover:border-orange-300'
@@ -362,13 +365,13 @@ export default function PostJobPage() {
             </div>
 
             <div className="flex gap-3">
-              <button onClick={() => setStep(1)} className="btn-secondary flex-1 justify-center">â Back</button>
-              <button onClick={() => setStep(3)} className="btn-primary flex-[2] justify-center">Continue â</button>
+              <button onClick={() => setStep(1)} className="btn-secondary flex-1 justify-center">← Back</button>
+              <button onClick={() => setStep(3)} className="btn-primary flex-[2] justify-center">Continue →</button>
             </div>
           </div>
         )}
 
-        {/* ââ STEP 3: Addresses + price âââââââââââââââââââââââââââââââââââââ */}
+        {/* -- STEP 3: Addresses + price -- */}
         {step === 3 && (
           <div className="space-y-5">
             {/* Addresses */}
@@ -415,7 +418,7 @@ export default function PostJobPage() {
             {/* Price breakdown */}
             {locationValid && (
               <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
-                <div className="text-sm font-bold text-orange-800 mb-3">ð° Price breakdown</div>
+                <div className="text-sm font-bold text-orange-800 mb-3">💰 Price breakdown</div>
                 <div className="space-y-1.5 text-sm">
                   {price.items.map((item, i) => (
                     <div key={i} className="flex justify-between items-center">
@@ -455,10 +458,10 @@ export default function PostJobPage() {
             {error && <p className="text-red-500 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
 
             <div className="flex gap-3">
-              <button onClick={() => setStep(2)} className="btn-secondary flex-1 justify-center">â Back</button>
+              <button onClick={() => setStep(2)} className="btn-secondary flex-1 justify-center">← Back</button>
               <button onClick={handleSubmit} disabled={!locationValid || loading}
                 className="btn-primary flex-[2] justify-center disabled:opacity-50">
-                {loading ? 'Postingâ¦' : `ð Find a Driver â $${price.total}`}
+                {loading ? 'Posting…' : `🚐 Find a Driver → $${price.total}`}
               </button>
             </div>
           </div>
