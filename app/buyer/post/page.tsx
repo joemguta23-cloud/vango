@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Nav from '@/components/Nav'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
 import { calculatePrice, DISTANCE_ZONE_LABELS, SERVICE_FEE, EXTRA_STOP_FEE } from '@/lib/pricing'
+import { FEATURE_FLAGS } from '@/lib/featureFlags'
 import type { ItemSize, JobItem, DistanceZone } from '@/types'
 
 // -- Item catalogue --------------------------------------------------------
@@ -59,6 +60,12 @@ export default function PostJobPage() {
   const [hasSecondDropoff, setHasSecondDropoff] = useState(false)
   const [secondDropoff, setSecondDropoff] = useState('')
 
+  // Promo / discount code (feature-flagged, see lib/featureFlags.ts)
+  const [promoCode, setPromoCode] = useState('')
+  const [promoStatus, setPromoStatus] = useState<'idle' | 'checking' | 'valid' | 'invalid'>('idle')
+  const [promoError, setPromoError] = useState('')
+  const [appliedDiscount, setAppliedDiscount] = useState<{ id: string; percentOff: number | null; waiveServiceFee: boolean } | null>(null)
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -83,12 +90,41 @@ export default function PostJobPage() {
     setCurrentItem({ _photoFile: file, _photoPreview: URL.createObjectURL(file) })
   }
 
+  const applyPromoCode = async () => {
+    if (!promoCode.trim()) return
+    setPromoStatus('checking')
+    setPromoError('')
+    try {
+      const res = await fetch('/api/discount-codes/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: promoCode.trim() }),
+      })
+      const data = await res.json()
+      if (data.valid) {
+        setAppliedDiscount({ id: data.id, percentOff: data.percentOff, waiveServiceFee: data.waiveServiceFee })
+        setPromoStatus('valid')
+      } else {
+        setAppliedDiscount(null)
+        setPromoStatus('invalid')
+        setPromoError(data.error || 'Invalid promo code')
+      }
+    } catch (e) {
+      setPromoStatus('invalid')
+      setPromoError('Could not check this code -- try again')
+    }
+  }
+
   // Pricing preview
   const priceItems = items.map(it => ({ size: it.item_size, label: `${it.item_type || 'Item'} (${it.item_size})` }))
   const price = calculatePrice(priceItems, distanceZone, {
     secondPickup: hasSecondPickup,
     secondDropoff: hasSecondDropoff,
   })
+  const discountedServiceFee = appliedDiscount
+    ? (appliedDiscount.waiveServiceFee ? 0 : Math.round(price.serviceFee * (1 - (appliedDiscount.percentOff || 0) / 100)))
+    : price.serviceFee
+  const displayTotal = price.driverFee + discountedServiceFee
 
   // Validation -- description is optional, only item type is required
   const item1Valid = !!currentItem.item_type
@@ -153,6 +189,8 @@ export default function PostJobPage() {
       status: 'pending',
       driver_fee: price.driverFee,
       service_fee: price.serviceFee,
+      // Promo / discount code (feature-flagged; null unless DISCOUNT_CODES_ENABLED)
+      discount_code_id: FEATURE_FLAGS.DISCOUNT_CODES_ENABLED ? (appliedDiscount?.id ?? null) : null,
     }).select().single()
 
     if (jobErr) { setError(jobErr.message); setLoading(false); return }
@@ -483,6 +521,30 @@ export default function PostJobPage() {
               <input className="input" placeholder="e.g. Driveway available, ground floor, narrow front door" />
             </div>
 
+            {/* Promo code (feature-flagged, see lib/featureFlags.ts) */}
+            {FEATURE_FLAGS.DISCOUNT_CODES_ENABLED && (
+              <div>
+                <label className="label">Promo code (optional)</label>
+                <div className="flex gap-2">
+                  <input className="input flex-1" placeholder="e.g. WELCOME10"
+                    value={promoCode}
+                    onChange={e => { setPromoCode(e.target.value); setPromoStatus('idle'); setAppliedDiscount(null) }} />
+                  <button type="button" onClick={applyPromoCode} disabled={promoStatus === 'checking' || !promoCode.trim()}
+                    className="btn-secondary px-4 disabled:opacity-50">
+                    {promoStatus === 'checking' ? '...' : 'Apply'}
+                  </button>
+                </div>
+                {promoStatus === 'valid' && appliedDiscount && (
+                  <p className="text-xs text-green-600 font-semibold mt-1.5">
+                    ✅ Code applied: {appliedDiscount.waiveServiceFee ? 'service fee waived' : `${appliedDiscount.percentOff}% off service fee`}
+                  </p>
+                )}
+                {promoStatus === 'invalid' && (
+                  <p className="text-xs text-red-500 font-semibold mt-1.5">{promoError}</p>
+                )}
+              </div>
+            )}
+
             {/* Price breakdown */}
             {locationValid && (
               <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
@@ -511,12 +573,19 @@ export default function PostJobPage() {
                   )}
                   <div className="flex justify-between">
                     <span className="text-orange-700">VanGo service fee</span>
-                    <span className="font-bold">${price.serviceFee}</span>
+                    {appliedDiscount ? (
+                      <span className="font-bold">
+                        <span className="line-through text-orange-300 mr-1.5">${price.serviceFee}</span>
+                        <span className="text-green-600">${discountedServiceFee}</span>
+                      </span>
+                    ) : (
+                      <span className="font-bold">${price.serviceFee}</span>
+                    )}
                   </div>
                   <div className="h-px bg-orange-200 my-2" />
                   <div className="flex justify-between font-black text-base">
                     <span>Total</span>
-                    <span className="text-orange-600">${price.total}</span>
+                    <span className="text-orange-600">${displayTotal}</span>
                   </div>
                   <div className="flex justify-between text-xs text-orange-600">
                     <span>Driver receives (cash on delivery)</span>
@@ -524,7 +593,7 @@ export default function PostJobPage() {
                   </div>
                 </div>
                 <p className="text-xs text-orange-600 mt-3">
-                  Pay <strong>${price.driverFee} cash</strong> to driver on delivery. The $12 service fee is charged to your card when you post.
+                  Pay <strong>${price.driverFee} cash</strong> to driver on delivery. The ${discountedServiceFee} service fee is charged to your card when you post.
                 </p>
               </div>
             )}
@@ -535,7 +604,7 @@ export default function PostJobPage() {
               <button onClick={() => setStep(2)} className="btn-secondary flex-1 justify-center">← Back</button>
               <button onClick={handleSubmit} disabled={!locationValid || loading}
                 className="btn-primary flex-[2] justify-center disabled:opacity-50">
-                {loading ? 'Posting…' : `🚐 Find a Driver → $${price.total}`}
+                {loading ? 'Posting…' : `🚐 Find a Driver → $${displayTotal}`}
               </button>
             </div>
           </div>
