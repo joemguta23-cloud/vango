@@ -5,11 +5,11 @@ import Nav from '@/components/Nav'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
 
 const STATUS_LABELS = {
-  pending:   { label: 'Finding driver',   icon: '🔍', msg: 'We're matching you with the nearest available driver...' },
-  accepted:  { label: 'Driver on the way', icon: '🚐', msg: 'Your driver has accepted and is heading to the seller.' },
-  picked_up: { label: 'Item collected',   icon: '📦', msg: 'Your item has been picked up and is on its way to you.' },
-  delivered: { label: 'Delivered!',       icon: '✅',    msg: '🎉 Your item has been delivered. Please pay the driver the agreed cash amount.' },
-  cancelled: { label: 'Cancelled',        icon: '❌',    msg: 'This job was cancelled.' },
+  pending: { label: 'Finding driver', icon: '🔍', msg: "We're matching you with the nearest available driver..." },
+  accepted: { label: 'Driver on the way', icon: '🚐', msg: 'Your driver has accepted and is heading to the seller.' },
+  picked_up: { label: 'Item collected', icon: '📦', msg: 'Your item has been picked up and is on its way to you.' },
+  delivered: { label: 'Delivered!', icon: '✅', msg: '🎉 Your item has been delivered. Please pay the driver the agreed cash amount.' },
+  cancelled: { label: 'Cancelled', icon: '❌', msg: 'This job was cancelled.' },
 }
 const STATUS_ORDER = ['pending', 'accepted', 'picked_up', 'delivered']
 
