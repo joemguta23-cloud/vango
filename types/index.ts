@@ -75,6 +75,16 @@ export interface Job {
   driver_fee: number
   service_fee: number
   stripe_payment_intent_id: string | null
+  // Cancellation policy (feature-flagged, see lib/featureFlags.ts). Free to
+  // cancel before a driver accepts; cancellation_fee_owed is set to true if
+  // cancelled after acceptance, and a $2 fee is folded into the buyer's next
+  // completed job's checkout once cancellation_fee_charged flips to true.
+  cancelled_at: string | null
+  cancelled_by: string | null
+  cancellation_fee_owed: boolean
+  cancellation_fee_charged: boolean
+  // Discount / promo code applied at posting time (feature-flagged).
+  discount_code_id: string | null
   created_at: string
   updated_at: string
   driver?: Driver
@@ -86,5 +96,48 @@ export interface JobStatusEvent {
   job_id: string
   status: JobStatus
   note: string | null
+  created_at: string
+}
+
+// ── Discount / promo codes (feature-flagged, see lib/featureFlags.ts) ─────────
+export interface DiscountCode {
+  id: string
+  code: string
+  percent_off: number | null
+  waive_service_fee: boolean
+  max_uses: number | null
+  uses_count: number
+  active: boolean
+  expires_at: string | null
+  created_at: string
+}
+
+// ── In-app messaging between buyer and driver on a job ────────────────────────
+export interface JobMessage {
+  id: string
+  job_id: string
+  sender_id: string
+  body: string
+  created_at: string
+  sender?: Profile
+}
+
+// ── Post-delivery buyer feedback / complaints ──────────────────────────────────
+export interface JobFeedback {
+  id: string
+  job_id: string
+  buyer_id: string
+  rating: number | null
+  comment: string | null
+  is_complaint: boolean
+  created_at: string
+}
+
+// ── Contact Us submissions ──────────────────────────────────────────────────────
+export interface ContactMessage {
+  id: string
+  name: string | null
+  email: string | null
+  message: string
   created_at: string
 }
