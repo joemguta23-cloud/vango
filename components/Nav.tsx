@@ -39,6 +39,7 @@ export default function Nav() {
               {profile.role === 'buyer' && <Link href="/buyer/post" className="btn-primary py-2 px-4 text-sm">📦 Post a Job</Link>}
               {profile.role === 'driver' && <Link href="/driver/dashboard" className="btn-primary py-2 px-4 text-sm">🚐 My Jobs</Link>}
               {profile.role === 'admin' && <Link href="/admin" className="btn-secondary py-2 px-4 text-sm">⚙️ Admin</Link>}
+              <Link href="/settings" className="btn-secondary py-2 px-4 text-sm">⚙️ Settings</Link>
               <button onClick={signOut} className="btn-secondary py-2 px-4 text-sm">Sign out</button>
             </>
           ) : (
@@ -65,6 +66,7 @@ export default function Nav() {
               {profile.role === 'buyer' && <Link href="/buyer/post" onClick={() => setMenuOpen(false)} className="btn-primary justify-center">📦 Post a Job</Link>}
               {profile.role === 'driver' && <Link href="/driver/dashboard" onClick={() => setMenuOpen(false)} className="btn-primary justify-center">🚐 My Jobs</Link>}
               {profile.role === 'admin' && <Link href="/admin" onClick={() => setMenuOpen(false)} className="btn-secondary justify-center">⚙️ Admin</Link>}
+              <Link href="/settings" onClick={() => setMenuOpen(false)} className="btn-secondary justify-center">⚙️ Settings</Link>
               <button onClick={signOut} className="btn-secondary justify-center">Sign out</button>
             </>
           ) : (
