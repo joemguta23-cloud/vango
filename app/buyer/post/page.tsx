@@ -142,6 +142,24 @@ export default function PostJobPage() {
       job_id: job.id, status: 'pending', note: 'Job posted -- finding driver',
     })
 
+    // Charge the $12 VanGo service fee via Stripe Checkout (card / Apple Pay / Google Pay).
+    // The driver's fee stays cash-on-delivery. If Checkout can't be created for any reason,
+    // don't strand the buyer -- the job is already posted, so fall through to tracking.
+    try {
+      const res = await fetch('/api/stripe/create-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: job.id }),
+      })
+      const data = await res.json()
+      if (res.ok && data.url) {
+        window.location.href = data.url
+        return
+      }
+    } catch (e) {
+      // fall through to tracking page below
+    }
+
     router.push(`/buyer/tracking/${job.id}`)
   }
 
