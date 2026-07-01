@@ -161,7 +161,7 @@ export default function DriverJobPage() {
           )}
         </div>
 
-                <div className="card">
+        <div className="card">
           <h2 className="font-bold text-sm text-slate-500 mb-3">Buyer</h2>
           <div className="flex items-center justify-between gap-2">
             <div>
