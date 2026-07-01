@@ -19,6 +19,7 @@ export interface Driver {
   is_online: boolean
   current_lat: number | null
   current_lng: number | null
+  location_updated_at: string | null
   rating: number
   total_jobs: number
   profile?: Profile
@@ -61,6 +62,13 @@ export interface Job {
   dropoff_address: string
   dropoff_lat: number
   dropoff_lng: number
+  second_pickup_address: string | null
+  second_pickup_lat: number | null
+  second_pickup_lng: number | null
+  second_dropoff_address: string | null
+  second_dropoff_lat: number | null
+  second_dropoff_lng: number | null
+  extra_stops_fee: number
   distance_zone: DistanceZone
   scheduled_for: string | null
   status: JobStatus
