@@ -23,7 +23,12 @@ export const DISTANCE_ZONE_LABELS: Record<DistanceZone, string> = {
   over_50: 'Over 50 km',
 }
 
-const ADDITIONAL_ITEM_DISCOUNT = 0.30
+// Tiered multi-item discount: 1st item full price, 2nd item 50% off,
+// 3rd item and every item after that 70% off.
+const ITEM_DISCOUNT_TIERS = [0, 0.5, 0.7]
+function discountForIndex(i: number): number {
+  return ITEM_DISCOUNT_TIERS[Math.min(i, ITEM_DISCOUNT_TIERS.length - 1)]
+}
 
 export const SERVICE_FEE = 12
 
@@ -40,7 +45,7 @@ export interface ExtraStops {
 }
 
 export interface PriceBreakdown {
-  items: { label: string; fee: number; discounted: boolean }[]
+  items: { label: string; fee: number; discounted: boolean; discountPercent: number }[]
   distanceSurcharge: number
   extraStopsFee: number
   driverFee: number
@@ -56,9 +61,10 @@ export function calculatePrice(items: PriceItem[], zone: DistanceZone, extraStop
   const distanceSurcharge = DISTANCE_SURCHARGE[zone][largestSize]
   const lineItems = items.map((item, i) => {
     const base = BASE[item.size]
-    const discounted = i > 0
-    const fee = discounted ? Math.round(base * (1 - ADDITIONAL_ITEM_DISCOUNT)) : base
-    return { label: item.label, fee, discounted }
+    const discount = discountForIndex(i)
+    const discounted = discount > 0
+    const fee = discounted ? Math.round(base * (1 - discount)) : base
+    return { label: item.label, fee, discounted, discountPercent: Math.round(discount * 100) }
   })
   const itemsTotal = lineItems.reduce((sum, i) => sum + i.fee, 0)
   const extraStopsFee = (extraStops.secondPickup ? EXTRA_STOP_FEE : 0) + (extraStops.secondDropoff ? EXTRA_STOP_FEE : 0)
@@ -67,3 +73,24 @@ export function calculatePrice(items: PriceItem[], zone: DistanceZone, extraStop
 }
 
 export function formatAUD(amount: number): string { return `$${amount.toFixed(0)}` }
+
+// -- Auto distance calculation -----------------------------------------
+// Straight-line (Haversine) distance in km between two lat/lng points.
+// Used once the buyer picks addresses via Google Places autocomplete, so we
+// avoid an extra paid Distance Matrix/Routes API call for a rough pricing
+// tier -- straight-line is a fine approximation for a 4-bucket price zone.
+export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+export function kmToZone(km: number): DistanceZone {
+  if (km < 15) return 'under_15'
+  if (km < 30) return '15_to_30'
+  if (km < 50) return '30_to_50'
+  return 'over_50'
+}
