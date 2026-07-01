@@ -4,8 +4,9 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Nav from '@/components/Nav'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
-import { calculatePrice, DISTANCE_ZONE_LABELS, SERVICE_FEE, EXTRA_STOP_FEE } from '@/lib/pricing'
+import { calculatePrice, DISTANCE_ZONE_LABELS, SERVICE_FEE, EXTRA_STOP_FEE, haversineKm, kmToZone } from '@/lib/pricing'
 import { FEATURE_FLAGS } from '@/lib/featureFlags'
+import AddressAutocomplete from '@/components/AddressAutocomplete'
 import type { ItemSize, JobItem, DistanceZone } from '@/types'
 
 // -- Item catalogue --------------------------------------------------------
@@ -47,18 +48,27 @@ export default function PostJobPage() {
   const [helperAtDropoff, setHelperAtDropoff] = useState(false)
   const [helperNote, setHelperNote] = useState('')
 
-  // Location + schedule
+  // Location + schedule -- lat/lng are captured automatically via Google
+  // Places autocomplete (see components/AddressAutocomplete.tsx). Distance
+  // is then calculated automatically below, no manual picker needed.
   const [pickup, setPickup] = useState('')
+  const [pickupLat, setPickupLat] = useState<number | null>(null)
+  const [pickupLng, setPickupLng] = useState<number | null>(null)
   const [dropoff, setDropoff] = useState('')
-  const [distanceZone, setDistanceZone] = useState<DistanceZone>('under_15')
+  const [dropoffLat, setDropoffLat] = useState<number | null>(null)
+  const [dropoffLng, setDropoffLng] = useState<number | null>(null)
   const [schedule, setSchedule] = useState<'asap' | 'scheduled'>('asap')
   const [scheduledFor, setScheduledFor] = useState('')
 
   // Multi-pickup / multi-dropoff (toggle + heavily discounted flat add-on fee)
   const [hasSecondPickup, setHasSecondPickup] = useState(false)
   const [secondPickup, setSecondPickup] = useState('')
+  const [secondPickupLat, setSecondPickupLat] = useState<number | null>(null)
+  const [secondPickupLng, setSecondPickupLng] = useState<number | null>(null)
   const [hasSecondDropoff, setHasSecondDropoff] = useState(false)
   const [secondDropoff, setSecondDropoff] = useState('')
+  const [secondDropoffLat, setSecondDropoffLat] = useState<number | null>(null)
+  const [secondDropoffLng, setSecondDropoffLng] = useState<number | null>(null)
 
   // Promo / discount code (feature-flagged, see lib/featureFlags.ts)
   const [promoCode, setPromoCode] = useState('')
@@ -115,6 +125,14 @@ export default function PostJobPage() {
     }
   }
 
+  // Auto distance calculation -- straight-line (Haversine) km between pickup
+  // and dropoff coordinates captured by AddressAutocomplete, mapped to the
+  // existing 4-bucket pricing zone. No manual picker needed anymore.
+  const distanceKm = (pickupLat != null && pickupLng != null && dropoffLat != null && dropoffLng != null)
+    ? haversineKm(pickupLat, pickupLng, dropoffLat, dropoffLng)
+    : null
+  const distanceZone: DistanceZone = distanceKm != null ? kmToZone(distanceKm) : 'under_15'
+
   // Pricing preview
   const priceItems = items.map(it => ({ size: it.item_size, label: `${it.item_type || 'Item'} (${it.item_size})` }))
   const price = calculatePrice(priceItems, distanceZone, {
@@ -169,20 +187,22 @@ export default function PostJobPage() {
       helper_at_pickup: helperAtPickup,
       helper_at_dropoff: helperAtDropoff,
       helper_note: helperNote || null,
-      // Location (lat/lng stubbed -- replace with geocoding API later)
+      // Location -- lat/lng captured automatically via Google Places
+      // autocomplete. Falls back to a Melbourne-area default only if the
+      // buyer typed an address without selecting an autocomplete suggestion.
       pickup_address: pickup,
-      pickup_lat: -37.9890,
-      pickup_lng: 145.2175,
+      pickup_lat: pickupLat ?? -37.9890,
+      pickup_lng: pickupLng ?? 145.2175,
       dropoff_address: dropoff,
-      dropoff_lat: -37.8136,
-      dropoff_lng: 144.9631,
-      // Multi-pickup / multi-dropoff (lat/lng stubbed same as above until geocoding is live)
+      dropoff_lat: dropoffLat ?? -37.8136,
+      dropoff_lng: dropoffLng ?? 144.9631,
+      // Multi-pickup / multi-dropoff
       second_pickup_address: hasSecondPickup ? secondPickup : null,
-      second_pickup_lat: hasSecondPickup ? -37.9890 : null,
-      second_pickup_lng: hasSecondPickup ? 145.2175 : null,
+      second_pickup_lat: hasSecondPickup ? (secondPickupLat ?? -37.9890) : null,
+      second_pickup_lng: hasSecondPickup ? (secondPickupLng ?? 145.2175) : null,
       second_dropoff_address: hasSecondDropoff ? secondDropoff : null,
-      second_dropoff_lat: hasSecondDropoff ? -37.8136 : null,
-      second_dropoff_lng: hasSecondDropoff ? 144.9631 : null,
+      second_dropoff_lat: hasSecondDropoff ? (secondDropoffLat ?? -37.8136) : null,
+      second_dropoff_lng: hasSecondDropoff ? (secondDropoffLng ?? 144.9631) : null,
       extra_stops_fee: price.extraStopsFee,
       distance_zone: distanceZone,
       scheduled_for: schedule === 'scheduled' ? scheduledFor : null,
@@ -344,7 +364,7 @@ export default function PostJobPage() {
             {/* Multi-item savings + ute-fit reminder */}
             {items.length > 1 && (
               <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800 space-y-1.5">
-                <div><span className="font-bold">🎉 Multi-item discount active:</span> your 2nd+ items are 30% cheaper because the driver is already making the trip.</div>
+                <div><span className="font-bold">🎉 Multi-item discount active:</span> your 2nd item is 50% cheaper and your 3rd+ items are 70% cheaper, because the driver is already making the trip.</div>
                 <div className="text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 -mx-1">
                   🚐 <strong>Heads up:</strong> all items need to fit together in the back of a single ute at the same time. Please describe how they'll be packed (e.g. stacked, disassembled) in the notes below so the driver can confirm it'll fit before accepting.
                 </div>
@@ -449,7 +469,7 @@ export default function PostJobPage() {
         {/* -- STEP 3: Addresses + price -- */}
         {step === 3 && (
           <div className="space-y-5">
-            {/* Addresses */}
+            {/* Addresses -- Google Places autocomplete captures lat/lng automatically */}
             <div>
               <label className="label">Pickup & Dropoff *</label>
               <div className="flex gap-3 items-start">
@@ -459,10 +479,12 @@ export default function PostJobPage() {
                   <div className="w-3 h-3 rounded-full bg-orange-500" />
                 </div>
                 <div className="flex-1 space-y-2">
-                  <input className="input" placeholder="Pickup: seller's full address + suburb + postcode"
-                    value={pickup} onChange={e => setPickup(e.target.value)} required />
-                  <input className="input" placeholder="Dropoff: your delivery address + suburb + postcode"
-                    value={dropoff} onChange={e => setDropoff(e.target.value)} required />
+                  <AddressAutocomplete placeholder="Pickup: seller's full address + suburb + postcode"
+                    value={pickup}
+                    onChange={(address, lat, lng) => { setPickup(address); setPickupLat(lat); setPickupLng(lng) }} />
+                  <AddressAutocomplete placeholder="Dropoff: your delivery address + suburb + postcode"
+                    value={dropoff}
+                    onChange={(address, lat, lng) => { setDropoff(address); setDropoffLat(lat); setDropoffLng(lng) }} />
                 </div>
               </div>
             </div>
@@ -479,8 +501,9 @@ export default function PostJobPage() {
                   className="w-5 h-5 accent-green-500 flex-shrink-0" />
               </label>
               {hasSecondPickup && (
-                <input className="input" placeholder="2nd pickup: full address + suburb + postcode"
-                  value={secondPickup} onChange={e => setSecondPickup(e.target.value)} />
+                <AddressAutocomplete placeholder="2nd pickup: full address + suburb + postcode"
+                  value={secondPickup}
+                  onChange={(address, lat, lng) => { setSecondPickup(address); setSecondPickupLat(lat); setSecondPickupLng(lng) }} />
               )}
 
               <label className="flex items-center justify-between gap-3 p-3.5 rounded-xl border-2 border-slate-200 cursor-pointer has-[:checked]:border-orange-500 has-[:checked]:bg-orange-50">
@@ -493,26 +516,27 @@ export default function PostJobPage() {
                   className="w-5 h-5 accent-orange-500 flex-shrink-0" />
               </label>
               {hasSecondDropoff && (
-                <input className="input" placeholder="2nd dropoff: full address + suburb + postcode"
-                  value={secondDropoff} onChange={e => setSecondDropoff(e.target.value)} />
+                <AddressAutocomplete placeholder="2nd dropoff: full address + suburb + postcode"
+                  value={secondDropoff}
+                  onChange={(address, lat, lng) => { setSecondDropoff(address); setSecondDropoffLat(lat); setSecondDropoffLng(lng) }} />
               )}
             </div>
 
-            {/* Distance zone */}
+            {/* Distance -- calculated automatically from the pickup/dropoff
+                coordinates captured by autocomplete above. */}
             <div>
-              <label className="label">Approximate distance between pickup and dropoff *</label>
-              <p className="text-xs text-slate-400 mb-2">Used for pricing. Automatic calculation coming soon.</p>
-              <div className="space-y-2">
-                {(Object.entries(DISTANCE_ZONE_LABELS) as [DistanceZone, string][]).map(([key, label]) => (
-                  <label key={key} className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
-                    distanceZone === key ? 'border-orange-500 bg-orange-50' : 'border-slate-200 hover:border-orange-300'
-                  }`}>
-                    <input type="radio" name="zone" value={key} checked={distanceZone === key}
-                      onChange={() => setDistanceZone(key)} className="accent-orange-500" />
-                    <span className="text-sm font-medium text-slate-700">{label}</span>
-                  </label>
-                ))}
-              </div>
+              <label className="label">Distance (auto-calculated)</label>
+              {distanceKm != null ? (
+                <div className="flex items-center gap-3 p-3 rounded-xl border-2 border-green-200 bg-green-50">
+                  <span className="text-sm font-semibold text-green-800">
+                    📍 {distanceKm.toFixed(1)} km -- {DISTANCE_ZONE_LABELS[distanceZone]} pricing tier
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 p-3 rounded-xl border-2 border-slate-200 bg-slate-50">
+                  <span className="text-sm text-slate-500">Select both addresses from the autocomplete suggestions to calculate distance.</span>
+                </div>
+              )}
             </div>
 
             {/* Access notes */}
@@ -554,7 +578,7 @@ export default function PostJobPage() {
                     <div key={i} className="flex justify-between items-center">
                       <span className="text-orange-700">
                         {item.label}
-                        {item.discounted && <span className="ml-1 text-xs text-green-600 font-semibold">(30% multi-item discount)</span>}
+                        {item.discounted && <span className="ml-1 text-xs text-green-600 font-semibold">({item.discountPercent}% multi-item discount)</span>}
                       </span>
                       <span className="font-bold">${item.fee}</span>
                     </div>
