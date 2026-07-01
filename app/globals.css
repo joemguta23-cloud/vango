@@ -27,10 +27,12 @@
 }
 
 /* Google Places autocomplete (components/AddressAutocomplete.tsx) --
-   style the wrapper to match .input, and make the embedded Google web
-   component transparent/borderless so it doesn't double up visually. */
+   style the wrapper to match .input. NOTE: no overflow-hidden here --
+   Google's suggestion dropdown is an absolutely-positioned child of this
+   element, and clipping it would hide the suggestion list entirely. */
 .vango-places-input {
-  @apply w-full border-2 border-slate-200 rounded-xl bg-white transition-colors overflow-hidden;
+  @apply w-full border-2 border-slate-200 rounded-xl bg-white transition-colors;
+  position: relative;
 }
 .vango-places-input:focus-within {
   @apply border-orange-400;
