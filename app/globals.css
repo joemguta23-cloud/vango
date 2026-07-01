@@ -25,3 +25,21 @@
   .badge-blue { @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700; }
   .badge-slate { @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500; }
 }
+
+/* Google Places autocomplete (components/AddressAutocomplete.tsx) --
+   style the wrapper to match .input, and make the embedded Google web
+   component transparent/borderless so it doesn't double up visually. */
+.vango-places-input {
+  @apply w-full border-2 border-slate-200 rounded-xl bg-white transition-colors overflow-hidden;
+}
+.vango-places-input:focus-within {
+  @apply border-orange-400;
+}
+gmp-place-autocomplete {
+  --gmpx-color-surface: transparent;
+  --gmpx-color-on-surface: #1e293b;
+  --gmpx-color-outline: transparent;
+  --gmpx-font-family-base: inherit;
+  width: 100%;
+  display: block;
+}
