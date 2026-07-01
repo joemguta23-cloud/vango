@@ -12,6 +12,12 @@ const ITEM_ICONS: Record<string, string> = {
   'Tools':'Tools','Garden':'Garden','Materials':'Materials','Other':'Item',
 }
 
+// How often to re-fetch jobs as a fallback in case the realtime websocket
+// silently drops (mobile backgrounding, network switch, etc). Realtime is
+// still the primary/fast path -- this just guarantees drivers never go more
+// than POLL_MS without seeing new jobs, even if the socket died silently.
+const POLL_MS = 12000
+
 export default function DriverDashboardPage() {
   const router = useRouter()
   const supabase = createSupabaseBrowserClient()
@@ -20,6 +26,7 @@ export default function DriverDashboardPage() {
   const [myJobs, setMyJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
     loadData()
@@ -27,7 +34,8 @@ export default function DriverDashboardPage() {
       .channel('pending-jobs')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, () => loadData())
       .subscribe()
-    return () => { supabase.removeChannel(channel) }
+    const poll = setInterval(() => loadData(), POLL_MS)
+    return () => { supabase.removeChannel(channel); clearInterval(poll) }
   }, [])
 
   const loadData = async () => {
@@ -43,12 +51,19 @@ export default function DriverDashboardPage() {
     setLoading(false)
   }
 
+  const refreshNow = async () => {
+    setRefreshing(true)
+    await loadData()
+    setRefreshing(false)
+  }
+
   const toggleOnline = async () => {
     if (!driver) return
     setToggling(true)
     await supabase.from('drivers').update({ is_online: !driver.is_online }).eq('id', driver.id)
     setDriver(d => d ? { ...d, is_online: !d.is_online } : d)
     setToggling(false)
+    loadData()
   }
 
   const acceptJob = async (job: Job) => {
@@ -61,8 +76,8 @@ export default function DriverDashboardPage() {
       )
       if (!confirmed) return
     }
-    const { error } = await supabase.from('jobs').update({ driver_id: driver.id, status: 'accepted' }).eq('id', job.id).eq('status', 'pending')
-    if (error) { alert('Sorry, that job was just taken.'); return }
+    const { data, error } = await supabase.from('jobs').update({ driver_id: driver.id, status: 'accepted' }).eq('id', job.id).eq('status', 'pending').select()
+    if (error || !data || data.length === 0) { alert('Sorry, that job was just taken.'); loadData(); return }
     await supabase.from('job_status_events').insert({ job_id: job.id, status: 'accepted', note: 'Driver accepted the job' })
     router.push(`/driver/job/${job.id}`)
   }
@@ -131,7 +146,13 @@ export default function DriverDashboardPage() {
 
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-bold text-base">Available jobs</h2>
-          <span className="text-sm text-slate-500">{jobs.length} available</span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-slate-500">{jobs.length} available</span>
+            <button onClick={refreshNow} disabled={refreshing}
+              className="text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+              {refreshing ? 'Refreshing...' : '🔄 Refresh'}
+            </button>
+          </div>
         </div>
 
         {!driver?.is_online && (
