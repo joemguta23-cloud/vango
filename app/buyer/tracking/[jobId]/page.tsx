@@ -73,6 +73,7 @@ export default function TrackingPage() {
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [cancelling, setCancelling] = useState(false)
+  const [showMessages, setShowMessages] = useState(false)
 
   const fetchJob = async () => {
     const { data } = await supabase.from('jobs').select('*, driver:drivers(*, profile:profiles(*))').eq('id', jobId).single()
