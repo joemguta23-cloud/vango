@@ -13,22 +13,47 @@ const STATUS_LABELS = {
 }
 const STATUS_ORDER = ['pending', 'accepted', 'picked_up', 'delivered']
 
-function MapEmbed({ pickupLat, pickupLng, dropoffLat, dropoffLng }) {
-  const minLng = Math.min(pickupLng, dropoffLng) - 0.05
-  const maxLng = Math.max(pickupLng, dropoffLng) + 0.05
-  const minLat = Math.min(pickupLat, dropoffLat) - 0.05
-  const maxLat = Math.max(pickupLat, dropoffLat) + 0.05
-  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${minLng},${minLat},${maxLng},${maxLat}&layer=mapnik`
+// Statuses during which the driver's live location should be shown/shared.
+// Once a job leaves this set (delivered/cancelled), we stop showing a driver
+// pin even if a stale lat/lng is still in the row, for privacy.
+const LIVE_TRACKING_STATUSES = ['accepted', 'picked_up']
+
+function timeAgo(iso) {
+  const secs = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000))
+  if (secs < 60) return `${secs}s ago`
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  return `${Math.floor(mins / 60)}h ago`
+}
+
+function MapEmbed({ pickupLat, pickupLng, dropoffLat, dropoffLng, driverLat, driverLng, driverUpdatedAt }) {
+  const hasDriver = driverLat != null && driverLng != null
+  const lats = [pickupLat, dropoffLat, ...(hasDriver ? [driverLat] : [])]
+  const lngs = [pickupLng, dropoffLng, ...(hasDriver ? [driverLng] : [])]
+  const minLng = Math.min(...lngs) - 0.05
+  const maxLng = Math.max(...lngs) + 0.05
+  const minLat = Math.min(...lats) - 0.05
+  const maxLat = Math.max(...lats) + 0.05
+  const markerParam = hasDriver ? `&marker=${driverLat},${driverLng}` : ''
+  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${minLng},${minLat},${maxLng},${maxLat}&layer=mapnik${markerParam}`
   return (
     <div className="card mb-4 p-0 overflow-hidden">
       <div className="px-4 pt-3 pb-2 flex items-center gap-2">
         <span className="text-base">🗺️</span>
         <h2 className="font-bold text-sm text-slate-600">Route map</h2>
+        {hasDriver && (
+          <span className="ml-auto flex items-center gap-1 text-xs font-semibold text-green-600">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Live
+          </span>
+        )}
       </div>
       <iframe src={src} className="w-full" style={{ height: 220, border: 0 }} loading="lazy" title="Delivery route map" />
-      <div className="px-4 py-2 flex gap-3 text-xs text-slate-500 border-t border-slate-100">
+      <div className="px-4 py-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500 border-t border-slate-100">
         <span>🟢 Pickup: {pickupLat.toFixed(4)}, {pickupLng.toFixed(4)}</span>
         <span>🔴 Dropoff: {dropoffLat.toFixed(4)}, {dropoffLng.toFixed(4)}</span>
+        {hasDriver && (
+          <span>🚐 Driver: {driverLat.toFixed(4)}, {driverLng.toFixed(4)}{driverUpdatedAt ? ` · updated ${timeAgo(driverUpdatedAt)}` : ''}</span>
+        )}
       </div>
     </div>
   )
@@ -60,11 +85,21 @@ export default function TrackingPage() {
     return () => { supabase.removeChannel(channel) }
   }, [jobId])
 
+  // Poll for the driver's live location while the job is actively out for
+  // delivery. This is on top of the realtime channel above (which only
+  // fires on `jobs`/`job_status_events` changes, not `drivers` changes).
+  useEffect(() => {
+    if (!job || !LIVE_TRACKING_STATUSES.includes(job.status)) return
+    const interval = setInterval(fetchJob, 10000)
+    return () => clearInterval(interval)
+  }, [job?.status, jobId])
+
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="text-5xl mb-4 animate-bounce">🚐</div></div>
   if (!job) return <div className="min-h-screen flex items-center justify-center"><p>Job not found.</p></div>
 
   const statusInfo = STATUS_LABELS[job.status] ?? STATUS_LABELS.pending
   const statusIndex = STATUS_ORDER.indexOf(job.status)
+  const showDriverLocation = LIVE_TRACKING_STATUSES.includes(job.status) && job.driver?.current_lat != null && job.driver?.current_lng != null
 
   return (
     <div>
@@ -101,7 +136,13 @@ export default function TrackingPage() {
         </div>
 
         {job.pickup_lat && job.dropoff_lat && (
-          <MapEmbed pickupLat={job.pickup_lat} pickupLng={job.pickup_lng} dropoffLat={job.dropoff_lat} dropoffLng={job.dropoff_lng} />
+          <MapEmbed
+            pickupLat={job.pickup_lat} pickupLng={job.pickup_lng}
+            dropoffLat={job.dropoff_lat} dropoffLng={job.dropoff_lng}
+            driverLat={showDriverLocation ? job.driver.current_lat : null}
+            driverLng={showDriverLocation ? job.driver.current_lng : null}
+            driverUpdatedAt={showDriverLocation ? job.driver.location_updated_at : null}
+          />
         )}
 
         {job.driver && (
