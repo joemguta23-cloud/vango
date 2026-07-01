@@ -7,9 +7,14 @@ import { createSupabaseBrowserClient } from '@/lib/supabase'
 import type { Job } from '@/types'
 
 const NEXT_STATUS: Record<string, { status: string; label: string; note: string }> = {
-  accepted:  { status: 'picked_up', label: 'Mark as Picked Up', note: 'Item collected from seller' },
+  accepted: { status: 'picked_up', label: 'Mark as Picked Up', note: 'Item collected from seller' },
   picked_up: { status: 'delivered', label: 'Mark as Delivered', note: 'Item delivered to buyer' },
 }
+
+// Statuses during which this driver's live location should be broadcast to
+// the buyer. Location sharing stops the moment the job leaves this set
+// (delivered, or the effect cleans up on unmount) -- for privacy.
+const LIVE_TRACKING_STATUSES = ['accepted', 'picked_up']
 
 export default function DriverJobPage() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -18,11 +23,41 @@ export default function DriverJobPage() {
   const [job, setJob] = useState<Job | null>(null)
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
+  const [locationSharing, setLocationSharing] = useState<'idle' | 'active' | 'denied' | 'unsupported'>('idle')
 
   useEffect(() => {
     supabase.from('jobs').select('*, buyer:profiles(*)').eq('id', jobId).single()
       .then(({ data }) => { setJob(data as Job); setLoading(false) })
   }, [jobId])
+
+  // Share this driver's live GPS position while the job is actively out for
+  // delivery, so the buyer can see the driver approaching on the map (like
+  // Uber Eats). Stops automatically once the job is delivered or this page
+  // is left, and never runs for any other job status.
+  useEffect(() => {
+    if (!job || !job.driver_id) return
+    if (!LIVE_TRACKING_STATUSES.includes(job.status)) return
+    if (!('geolocation' in navigator)) { setLocationSharing('unsupported'); return }
+
+    let lastSent = 0
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        setLocationSharing('active')
+        const now = Date.now()
+        if (now - lastSent < 8000) return // throttle writes to roughly every 8s
+        lastSent = now
+        supabase.from('drivers').update({
+          current_lat: pos.coords.latitude,
+          current_lng: pos.coords.longitude,
+          location_updated_at: new Date().toISOString(),
+        }).eq('id', job.driver_id).then()
+      },
+      () => { setLocationSharing('denied') },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+    )
+
+    return () => navigator.geolocation.clearWatch(watchId)
+  }, [job?.status, job?.driver_id])
 
   const advanceStatus = async () => {
     if (!job) return
@@ -34,6 +69,12 @@ export default function DriverJobPage() {
       job_id: jobId, status: next.status, note: next.note,
     })
     if (next.status === 'delivered') {
+      // Privacy: stop showing this driver's location to anyone once the job is done.
+      if (job.driver_id) {
+        await supabase.from('drivers').update({
+          current_lat: null, current_lng: null, location_updated_at: null,
+        }).eq('id', job.driver_id)
+      }
       router.push('/driver/dashboard')
     } else {
       setJob(j => j ? { ...j, status: next.status as any } : j)
@@ -45,6 +86,7 @@ export default function DriverJobPage() {
   if (!job) return <div className="min-h-screen flex items-center justify-center">Job not found.</div>
 
   const nextAction = NEXT_STATUS[job.status]
+  const showLocationBanner = LIVE_TRACKING_STATUSES.includes(job.status)
 
   return (
     <div>
@@ -54,6 +96,19 @@ export default function DriverJobPage() {
           <h1 className="text-xl font-black">Active Job</h1>
           <span className="badge-orange capitalize">{job.status.replace('_',' ')}</span>
         </div>
+
+        {showLocationBanner && (
+          <div className={`rounded-xl px-4 py-2.5 text-xs font-semibold flex items-center gap-2 ${
+            locationSharing === 'active' ? 'bg-green-50 border border-green-200 text-green-700'
+            : locationSharing === 'denied' ? 'bg-amber-50 border border-amber-200 text-amber-700'
+            : 'bg-slate-50 border border-slate-200 text-slate-500'
+          }`}>
+            {locationSharing === 'active' && (<><span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Sharing your live location with the buyer</>)}
+            {locationSharing === 'denied' && (<>⚠️ Location permission denied -- turn on location services so the buyer can see you're on the way</>)}
+            {locationSharing === 'unsupported' && (<>Live location isn't supported on this device</>)}
+            {locationSharing === 'idle' && (<>📍 Starting live location sharing...</>)}
+          </div>
+        )}
 
         <div className="card">
           <h2 className="font-bold text-sm text-slate-500 mb-4">Route</h2>
