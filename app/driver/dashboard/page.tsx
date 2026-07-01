@@ -53,6 +53,14 @@ export default function DriverDashboardPage() {
 
   const acceptJob = async (job: Job) => {
     if (!driver) return
+    const itemCount = Array.isArray((job as any).items) ? (job as any).items.length : 1
+    if (itemCount > 1) {
+      const itemList = (job as any).items.map((it: any) => it.item_type).join(', ')
+      const confirmed = window.confirm(
+        `This job has ${itemCount} items (${itemList}) that all need to fit in your vehicle at the same time. Please check the item descriptions/photos and confirm everything will fit before accepting.\n\nContinue and accept this job?`
+      )
+      if (!confirmed) return
+    }
     const { error } = await supabase.from('jobs').update({ driver_id: driver.id, status: 'accepted' }).eq('id', job.id).eq('status', 'pending')
     if (error) { alert('Sorry, that job was just taken.'); return }
     await supabase.from('job_status_events').insert({ job_id: job.id, status: 'accepted', note: 'Driver accepted the job' })
@@ -140,31 +148,44 @@ export default function DriverDashboardPage() {
           </div>
         )}
 
-        {driver?.is_online && jobs.map(job => (
-          <div key={job.id} className="card mb-3 hover:border-orange-300 hover:shadow-md transition-all cursor-pointer">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <div className="font-bold">{job.item_type}</div>
-                <div className="text-xs text-slate-500 capitalize">{job.item_size}</div>
+        {driver?.is_online && jobs.map(job => {
+          const itemCount = Array.isArray((job as any).items) ? (job as any).items.length : 1
+          return (
+            <div key={job.id} className="card mb-3 hover:border-orange-300 hover:shadow-md transition-all cursor-pointer">
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <div className="font-bold flex items-center gap-2">
+                    {job.item_type}
+                    {itemCount > 1 && (
+                      <span className="badge-orange">📦 {itemCount} items</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 capitalize">{job.item_size}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xl font-black">${job.driver_fee}</div>
+                  <div className="text-xs text-slate-400">cash</div>
+                </div>
               </div>
-              <div className="text-right">
-                <div className="text-xl font-black">${job.driver_fee}</div>
-                <div className="text-xs text-slate-400">cash</div>
+              {itemCount > 1 && (
+                <div className="mb-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
+                  ⚠️ Multiple items -- check they'll all fit in your vehicle before accepting.
+                </div>
+              )}
+              <div className="flex items-center gap-2 text-sm text-slate-600 mb-3">
+                <span>{job.pickup_address.split(',')[0]}</span>
+                <span className="text-slate-300">to</span>
+                <span>{job.dropoff_address.split(',')[0]}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">{job.scheduled_for ? new Date(job.scheduled_for).toLocaleDateString('en-AU') : 'ASAP'}</span>
+                <button onClick={() => acceptJob(job)} className="btn-primary py-2 px-5 text-sm">
+                  Accept Job
+                </button>
               </div>
             </div>
-            <div className="flex items-center gap-2 text-sm text-slate-600 mb-3">
-              <span>{job.pickup_address.split(',')[0]}</span>
-              <span className="text-slate-300">to</span>
-              <span>{job.dropoff_address.split(',')[0]}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-400">{job.scheduled_for ? new Date(job.scheduled_for).toLocaleDateString('en-AU') : 'ASAP'}</span>
-              <button onClick={() => acceptJob(job)} className="btn-primary py-2 px-5 text-sm">
-                Accept Job
-              </button>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
