@@ -1,6 +1,6 @@
 /**
  * VanGo Pricing Engine
- * Formula: driver_fee = base_rate + distance_charge + multi_item_discount
+ * Formula: driver_fee = base_rate + distance_charge + multi_item_discount + extra_stops_fee
  * service_fee = $12 flat (VanGo's revenue)
  */
 import type { ItemSize } from '@/types'
@@ -27,18 +27,29 @@ const ADDITIONAL_ITEM_DISCOUNT = 0.30
 
 export const SERVICE_FEE = 12
 
+// Flat add-on for a 2nd pickup or 2nd dropoff on the same job. Deliberately
+// cheap compared to booking a whole separate job, since the driver is
+// already en route -- this is what makes multi-stop worth it for the buyer.
+export const EXTRA_STOP_FEE = 15
+
 export interface PriceItem { size: ItemSize; label: string }
+
+export interface ExtraStops {
+  secondPickup?: boolean
+  secondDropoff?: boolean
+}
 
 export interface PriceBreakdown {
   items: { label: string; fee: number; discounted: boolean }[]
   distanceSurcharge: number
+  extraStopsFee: number
   driverFee: number
   serviceFee: number
   total: number
 }
 
-export function calculatePrice(items: PriceItem[], zone: DistanceZone): PriceBreakdown {
-  if (items.length === 0) return { items: [], distanceSurcharge: 0, driverFee: 0, serviceFee: SERVICE_FEE, total: SERVICE_FEE }
+export function calculatePrice(items: PriceItem[], zone: DistanceZone, extraStops: ExtraStops = {}): PriceBreakdown {
+  if (items.length === 0) return { items: [], distanceSurcharge: 0, extraStopsFee: 0, driverFee: 0, serviceFee: SERVICE_FEE, total: SERVICE_FEE }
   const sizeOrder: ItemSize[] = ['medium', 'large', 'xlarge']
   const largestSize = items.reduce((max, item) =>
     sizeOrder.indexOf(item.size) > sizeOrder.indexOf(max) ? item.size : max, 'medium' as ItemSize)
@@ -50,8 +61,9 @@ export function calculatePrice(items: PriceItem[], zone: DistanceZone): PriceBre
     return { label: item.label, fee, discounted }
   })
   const itemsTotal = lineItems.reduce((sum, i) => sum + i.fee, 0)
-  const driverFee = itemsTotal + distanceSurcharge
-  return { items: lineItems, distanceSurcharge, driverFee, serviceFee: SERVICE_FEE, total: driverFee + SERVICE_FEE }
+  const extraStopsFee = (extraStops.secondPickup ? EXTRA_STOP_FEE : 0) + (extraStops.secondDropoff ? EXTRA_STOP_FEE : 0)
+  const driverFee = itemsTotal + distanceSurcharge + extraStopsFee
+  return { items: lineItems, distanceSurcharge, extraStopsFee, driverFee, serviceFee: SERVICE_FEE, total: driverFee + SERVICE_FEE }
 }
 
 export function formatAUD(amount: number): string { return `$${amount.toFixed(0)}` }
