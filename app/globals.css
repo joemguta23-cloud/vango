@@ -4,6 +4,7 @@
 @tailwind utilities;
 
 @layer base {
+  html, body { @apply overflow-x-hidden w-full max-w-[100vw]; }
   body { @apply font-sans text-slate-800 bg-slate-50; }
 }
 
