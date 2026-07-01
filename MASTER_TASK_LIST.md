@@ -15,7 +15,7 @@ Last updated: 2026-07-01
 
 ## 1. Payments & fees
 
-- `[IN PROGRESS]` **$12 service fee real payment processing** - Stripe Checkout, card + Apple Pay + Google Pay. PayPal support depends on Stripe account region/config (check Stripe Dashboard > Settings > Payment methods). Fee is deducted from the driver's payout, not charged as a separate driver cost.
+- `[LIVE]` **$12 service fee real payment processing** - Buyers are redirected to a real Stripe Checkout page when they post a job, charged exactly $12 AUD, described as "VanGo service fee". Card and Apple Pay are enabled in the Stripe account; Google Pay was enabled today. PayPal is NOT available in this Stripe account/region -- would need a separate PayPal Business integration if wanted later. The driver's fee stays cash-on-delivery, unaffected by this charge. Webhook endpoint `vango-production` (`https://getvango.com.au/api/stripe/webhook`) is live and confirmed receiving `payment_intent.succeeded` / `payment_intent.payment_failed` events, which mark the job as paid and notify the buyer. Tested end-to-end on production on 2026-07-01: job post -> Checkout session created -> correct $12 fee shown.
 - `[BUILT-OFF]` **Cancellation policy** - Free to cancel before a driver accepts. $2 fee if cancelled after a driver has accepted and is en route; fee is charged automatically the next time the buyer completes a paid job (not charged immediately). Code and DB fields exist but the cancel button / fee logic is behind a feature flag and not yet shown to users. Turn on when ready in `lib/featureFlags.ts`.
 - `[BUILT-OFF]` **Discount / promo codes** - Admin-issued codes for 10%, 20%, or 30% off, or a full service-fee waiver (for the launch promotion). Code + DB table exist, not exposed in the checkout UI yet. Turn on in `lib/featureFlags.ts` when ready to launch the promo.
 - `[TODO]` **GST registration** - ABN is not currently GST-registered, so no GST is being charged/remitted. Once turnover approaches the ATO's $75,000/year GST threshold (or earlier by choice), register for GST and add a GST line item to the service fee invoicing. Revisit with an accountant before flipping this on.
@@ -46,6 +46,7 @@ Last updated: 2026-07-01
 - Item description was silently required despite being meant to be optional - fixed.
 - Multi-item "add another item" crashed the whole page (typo: `ADDTIONAL_ITEM_DISCOUNT` vs `ADDITIONAL_ITEM_DISCOUNT`) - fixed.
 - Drivers now see a warning + confirmation before accepting a multi-item job, so they can check it'll fit in their vehicle.
+- Real $12 service fee payment via Stripe Checkout is live -- new `app/api/stripe/create-checkout-session/route.ts`, wired into `app/buyer/post/page.tsx`, webhook endpoint recreated pointing at the real production domain with a fresh signing secret set in Vercel.
 
 ---
 
