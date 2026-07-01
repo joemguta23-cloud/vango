@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Nav from '@/components/Nav'
+import MessageThread from '@/components/MessageThread'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
 import type { Job } from '@/types'
 
@@ -24,6 +25,7 @@ export default function DriverJobPage() {
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
   const [locationSharing, setLocationSharing] = useState<'idle' | 'active' | 'denied' | 'unsupported'>('idle')
+  const [showMessages, setShowMessages] = useState(false)
 
   useEffect(() => {
     supabase.from('jobs').select('*, buyer:profiles(*)').eq('id', jobId).single()
@@ -159,17 +161,17 @@ export default function DriverJobPage() {
           )}
         </div>
 
-        <div className="card">
+                <div className="card">
           <h2 className="font-bold text-sm text-slate-500 mb-3">Buyer</h2>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <div>
               <div className="font-bold">{job.buyer?.full_name}</div>
               <div className="text-sm text-slate-500">{job.buyer?.phone}</div>
             </div>
-            <a href={`tel:${job.buyer?.phone}`}
-              className="bg-green-100 text-green-700 font-semibold px-4 py-2 rounded-xl text-sm hover:bg-green-200 transition-colors">
-              Call
-            </a>
+            <div className="flex gap-2">
+              <button onClick={() => setShowMessages(true)} className="bg-blue-100 text-blue-700 font-semibold px-4 py-2 rounded-xl text-sm hover:bg-blue-200 transition-colors">Message</button>
+              <a href={`tel:${job.buyer?.phone}`} className="bg-green-100 text-green-700 font-semibold px-4 py-2 rounded-xl text-sm hover:bg-green-200 transition-colors">Call</a>
+            </div>
           </div>
         </div>
 
@@ -189,6 +191,7 @@ export default function DriverJobPage() {
           Back to dashboard
         </button>
       </div>
+      {showMessages && <MessageThread jobId={jobId} onClose={() => setShowMessages(false)} />}
     </div>
   )
 }
