@@ -36,7 +36,7 @@ function SignupForm() {
         {['buyer','driver'].map(r => (
           <button key={r} type="button" onClick={() => setRole(r)}
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${role === r ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-            {r === 'buyer' ? '📦 I need delivery' : '🚐 I'm a driver'}
+            {r === 'buyer' ? '📦 I need delivery' : "🚐 I'm a driver"}
           </button>
         ))}
       </div>
