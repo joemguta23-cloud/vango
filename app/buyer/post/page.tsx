@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Nav from '@/components/Nav'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
-import { calculatePrice, DISTANCE_ZONE_LABELS, SERVICE_FEE } from '@/lib/pricing'
+import { calculatePrice, DISTANCE_ZONE_LABELS, SERVICE_FEE, EXTRA_STOP_FEE } from '@/lib/pricing'
 import type { ItemSize, JobItem, DistanceZone } from '@/types'
 
 // -- Item catalogue --------------------------------------------------------
@@ -53,6 +53,12 @@ export default function PostJobPage() {
   const [schedule, setSchedule] = useState<'asap' | 'scheduled'>('asap')
   const [scheduledFor, setScheduledFor] = useState('')
 
+  // Multi-pickup / multi-dropoff (toggle + heavily discounted flat add-on fee)
+  const [hasSecondPickup, setHasSecondPickup] = useState(false)
+  const [secondPickup, setSecondPickup] = useState('')
+  const [hasSecondDropoff, setHasSecondDropoff] = useState(false)
+  const [secondDropoff, setSecondDropoff] = useState('')
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -79,12 +85,17 @@ export default function PostJobPage() {
 
   // Pricing preview
   const priceItems = items.map(it => ({ size: it.item_size, label: `${it.item_type || 'Item'} (${it.item_size})` }))
-  const price = calculatePrice(priceItems, distanceZone)
+  const price = calculatePrice(priceItems, distanceZone, {
+    secondPickup: hasSecondPickup,
+    secondDropoff: hasSecondDropoff,
+  })
 
   // Validation -- description is optional, only item type is required
   const item1Valid = !!currentItem.item_type
   const allItemsFilled = items.every(it => it.item_type)
   const locationValid = pickup && dropoff
+    && (!hasSecondPickup || !!secondPickup)
+    && (!hasSecondDropoff || !!secondDropoff)
 
   // -- Submit ------------------------------------------------------------
   const handleSubmit = async () => {
@@ -129,6 +140,14 @@ export default function PostJobPage() {
       dropoff_address: dropoff,
       dropoff_lat: -37.8136,
       dropoff_lng: 144.9631,
+      // Multi-pickup / multi-dropoff (lat/lng stubbed same as above until geocoding is live)
+      second_pickup_address: hasSecondPickup ? secondPickup : null,
+      second_pickup_lat: hasSecondPickup ? -37.9890 : null,
+      second_pickup_lng: hasSecondPickup ? 145.2175 : null,
+      second_dropoff_address: hasSecondDropoff ? secondDropoff : null,
+      second_dropoff_lat: hasSecondDropoff ? -37.8136 : null,
+      second_dropoff_lng: hasSecondDropoff ? 144.9631 : null,
+      extra_stops_fee: price.extraStopsFee,
       distance_zone: distanceZone,
       scheduled_for: schedule === 'scheduled' ? scheduledFor : null,
       status: 'pending',
@@ -410,6 +429,37 @@ export default function PostJobPage() {
               </div>
             </div>
 
+            {/* Multi-pickup / multi-dropoff toggles */}
+            <div className="space-y-3">
+              <label className="flex items-center justify-between gap-3 p-3.5 rounded-xl border-2 border-slate-200 cursor-pointer has-[:checked]:border-green-500 has-[:checked]:bg-green-50">
+                <div>
+                  <div className="font-semibold text-slate-800 text-sm">➕ Add a 2nd pickup address</div>
+                  <div className="text-xs text-slate-500 mt-0.5">Grabbing something from a second seller on the way? Just +${EXTRA_STOP_FEE} -- way cheaper than a separate job.</div>
+                </div>
+                <input type="checkbox" checked={hasSecondPickup}
+                  onChange={e => setHasSecondPickup(e.target.checked)}
+                  className="w-5 h-5 accent-green-500 flex-shrink-0" />
+              </label>
+              {hasSecondPickup && (
+                <input className="input" placeholder="2nd pickup: full address + suburb + postcode"
+                  value={secondPickup} onChange={e => setSecondPickup(e.target.value)} />
+              )}
+
+              <label className="flex items-center justify-between gap-3 p-3.5 rounded-xl border-2 border-slate-200 cursor-pointer has-[:checked]:border-orange-500 has-[:checked]:bg-orange-50">
+                <div>
+                  <div className="font-semibold text-slate-800 text-sm">➕ Add a 2nd dropoff address</div>
+                  <div className="text-xs text-slate-500 mt-0.5">Dropping items at two places? Just +${EXTRA_STOP_FEE} -- way cheaper than a separate job.</div>
+                </div>
+                <input type="checkbox" checked={hasSecondDropoff}
+                  onChange={e => setHasSecondDropoff(e.target.checked)}
+                  className="w-5 h-5 accent-orange-500 flex-shrink-0" />
+              </label>
+              {hasSecondDropoff && (
+                <input className="input" placeholder="2nd dropoff: full address + suburb + postcode"
+                  value={secondDropoff} onChange={e => setSecondDropoff(e.target.value)} />
+              )}
+            </div>
+
             {/* Distance zone */}
             <div>
               <label className="label">Approximate distance between pickup and dropoff *</label>
@@ -451,6 +501,12 @@ export default function PostJobPage() {
                     <div className="flex justify-between">
                       <span className="text-orange-700">Distance charge</span>
                       <span className="font-bold">+${price.distanceSurcharge}</span>
+                    </div>
+                  )}
+                  {price.extraStopsFee > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-orange-700">Extra stop(s)</span>
+                      <span className="font-bold">+${price.extraStopsFee}</span>
                     </div>
                   )}
                   <div className="flex justify-between">
