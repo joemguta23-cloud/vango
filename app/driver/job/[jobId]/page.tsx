@@ -87,6 +87,7 @@ export default function DriverJobPage() {
 
   const nextAction = NEXT_STATUS[job.status]
   const showLocationBanner = LIVE_TRACKING_STATUSES.includes(job.status)
+  const hasExtraStops = !!(job.second_pickup_address || job.second_dropoff_address)
 
   return (
     <div>
@@ -110,6 +111,12 @@ export default function DriverJobPage() {
           </div>
         )}
 
+        {hasExtraStops && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 text-xs font-semibold text-blue-700">
+            🧭 This job has extra stops -- check the route below before accepting the next step
+          </div>
+        )}
+
         <div className="card">
           <h2 className="font-bold text-sm text-slate-500 mb-4">Route</h2>
           <div className="flex gap-3 items-start mb-3">
@@ -123,10 +130,22 @@ export default function DriverJobPage() {
                 <div className="text-xs font-semibold text-slate-500 mb-0.5">PICKUP</div>
                 <div className="font-semibold text-sm">{job.pickup_address}</div>
               </div>
+              {job.second_pickup_address && (
+                <div>
+                  <div className="text-xs font-semibold text-slate-500 mb-0.5">2ND PICKUP</div>
+                  <div className="font-semibold text-sm">{job.second_pickup_address}</div>
+                </div>
+              )}
               <div>
                 <div className="text-xs font-semibold text-slate-500 mb-0.5">DROPOFF</div>
                 <div className="font-semibold text-sm">{job.dropoff_address}</div>
               </div>
+              {job.second_dropoff_address && (
+                <div>
+                  <div className="text-xs font-semibold text-slate-500 mb-0.5">2ND DROPOFF</div>
+                  <div className="font-semibold text-sm">{job.second_dropoff_address}</div>
+                </div>
+              )}
             </div>
           </div>
         </div>
