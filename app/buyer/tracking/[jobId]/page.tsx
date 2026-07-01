@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Nav from '@/components/Nav'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
+import { FEATURE_FLAGS } from '@/lib/featureFlags'
 
 const STATUS_LABELS = {
   pending: { label: 'Finding driver', icon: '🔍', msg: "We're matching you with the nearest available driver..." },
@@ -17,6 +18,11 @@ const STATUS_ORDER = ['pending', 'accepted', 'picked_up', 'delivered']
 // Once a job leaves this set (delivered/cancelled), we stop showing a driver
 // pin even if a stale lat/lng is still in the row, for privacy.
 const LIVE_TRACKING_STATUSES = ['accepted', 'picked_up']
+
+// Statuses from which a buyer can still cancel (feature-flagged, see
+// lib/featureFlags.ts). Free before a driver accepts; a $2 fee applies
+// once a driver has already accepted.
+const CANCELLABLE_STATUSES = ['pending', 'accepted']
 
 function timeAgo(iso) {
   const secs = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000))
@@ -65,6 +71,7 @@ export default function TrackingPage() {
   const [job, setJob] = useState(null)
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
+  const [cancelling, setCancelling] = useState(false)
 
   const fetchJob = async () => {
     const { data } = await supabase.from('jobs').select('*, driver:drivers(*, profile:profiles(*))').eq('id', jobId).single()
@@ -94,12 +101,39 @@ export default function TrackingPage() {
     return () => clearInterval(interval)
   }, [job?.status, jobId])
 
+  const handleCancel = async () => {
+    if (!job) return
+    const afterAccept = job.status !== 'pending'
+    const warning = afterAccept
+      ? 'Cancel this job? Since a driver has already accepted, a $2 fee will be added to your next completed job.'
+      : 'Cancel this job? This is free since no driver has accepted yet.'
+    if (!confirm(warning)) return
+    setCancelling(true)
+    try {
+      const res = await fetch('/api/jobs/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      })
+      if (res.ok) {
+        await fetchJob()
+        await fetchEvents()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error || 'Could not cancel this job.')
+      }
+    } finally {
+      setCancelling(false)
+    }
+  }
+
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="text-5xl mb-4 animate-bounce">🚐</div></div>
   if (!job) return <div className="min-h-screen flex items-center justify-center"><p>Job not found.</p></div>
 
   const statusInfo = STATUS_LABELS[job.status] ?? STATUS_LABELS.pending
   const statusIndex = STATUS_ORDER.indexOf(job.status)
   const showDriverLocation = LIVE_TRACKING_STATUSES.includes(job.status) && job.driver?.current_lat != null && job.driver?.current_lng != null
+  const canCancel = FEATURE_FLAGS.CANCELLATION_ENABLED && CANCELLABLE_STATUSES.includes(job.status)
 
   return (
     <div>
@@ -181,6 +215,13 @@ export default function TrackingPage() {
             ))}
           </div>
         </div>
+
+        {canCancel && (
+          <button onClick={handleCancel} disabled={cancelling}
+            className="w-full text-center text-red-600 font-semibold text-sm py-2.5 mb-4 rounded-xl border border-red-200 hover:bg-red-50 transition-colors">
+            {cancelling ? 'Cancelling...' : job.status === 'pending' ? 'Cancel job (free)' : 'Cancel job ($2 fee applies)'}
+          </button>
+        )}
 
         {events.length > 0 && (
           <div className="card">
