@@ -1,17 +1,24 @@
 /**
  * VanGo Pricing Engine
- * Formula: driver_fee = base_rate + distance_charge + multi_item_discount + extra_stops_fee
- * service_fee = $11.99 flat (VanGo's revenue)
+ *
+ * SINGLE SOURCE OF TRUTH for the rules is PRICING_ANALYTICS_POLICY.md.
+ * Keep the numbers here in sync with that doc as we tune from real delivery data.
+ *
+ * driver_fee (cash) = ((item_base + multi_item_discount) + distance_zone_surcharge)
+ *                     x time_multiplier + extra_stops_fee, then ROUNDED UP to nearest $5.
+ * A per-driver fuel surcharge for the driver->pickup leg is added when a driver is matched.
+ * service_fee (card, platform revenue) = $11.99 flat.
  */
 import type { ItemSize } from '@/types'
 
-const BASE: Record<ItemSize, number> = { medium: 44, large: 68, xlarge: 104 }
+// Full-price base fees. The time-of-day multiplier below applies the discount/surcharge.
+const BASE: Record<ItemSize, number> = { medium: 55, large: 85, xlarge: 130 }
 
 const DISTANCE_SURCHARGE: {[key: string]: Record<ItemSize, number>} = {
   'under_15': { medium: 0, large: 0, xlarge: 0 },
-  '15_to_30': { medium: 16, large: 20, xlarge: 28 },
-  '30_to_50': { medium: 32, large: 40, xlarge: 52 },
-  'over_50': { medium: 52, large: 64, xlarge: 80 },
+  '15_to_30': { medium: 20, large: 25, xlarge: 35 },
+  '30_to_50': { medium: 40, large: 50, xlarge: 65 },
+  'over_50': { medium: 65, large: 80, xlarge: 100 },
 }
 
 export type DistanceZone = 'under_15' | '15_to_30' | '30_to_50' | 'over_50'
@@ -23,19 +30,62 @@ export const DISTANCE_ZONE_LABELS: Record<DistanceZone, string> = {
   over_50: 'Over 50 km',
 }
 
-// Tiered multi-item discount: 1st item full price, 2nd item 50% off,
-// 3rd item and every item after that 70% off.
+// Tiered multi-item discount: 1st item full price, 2nd 50% off, 3rd+ 70% off.
 const ITEM_DISCOUNT_TIERS = [0, 0.5, 0.7]
 function discountForIndex(i: number): number {
   return ITEM_DISCOUNT_TIERS[Math.min(i, ITEM_DISCOUNT_TIERS.length - 1)]
 }
 
+// Platform's flat card fee (revenue). The driver fee is paid separately in cash.
 export const SERVICE_FEE = 11.99
 
-// Flat add-on for a 2nd pickup or 2nd dropoff on the same job. Deliberately
-// cheap compared to booking a whole separate job, since the driver is
-// already en route -- this is what makes multi-stop worth it for the buyer.
-export const EXTRA_STOP_FEE = 12
+// Add-on for a 2nd pickup or 2nd dropoff on the same job.
+export const EXTRA_STOP_FEE = 15
+
+// Driver-economics constants.
+export const FUEL_RATE_PER_KM = 0.70        // driver fuel reimbursement, per km
+export const FREE_PICKUP_KM = 10            // first 10km to pickup are free (except late-night)
+export const PLATFORM_CONNECTION_FEE = 0.99 // all the platform keeps on a late buyer-cancellation
+
+// Round a cash amount UP to the nearest $5 (drivers rarely carry coins/change).
+export function roundUpTo5(amount: number): number {
+  return Math.ceil(amount / 5) * 5
+}
+
+export function isLateNight(at: Date = new Date()): boolean {
+  const mins = at.getHours() * 60 + at.getMinutes()
+  return mins >= 21 * 60 || mins < 7 * 60 // 9:00pm - 7:00am
+}
+
+/**
+ * Time-of-day demand multiplier applied to the delivery subtotal.
+ * Weekdays are busier (smaller discount); commute peaks get a surcharge;
+ * late night is full price. Tune these values in PRICING_ANALYTICS_POLICY.md.
+ */
+export function pricingMultiplier(at: Date = new Date()): number {
+  const day = at.getDay()                 // 0=Sun ... 6=Sat
+  const isWeekend = day === 0 || day === 6
+  const mins = at.getHours() * 60 + at.getMinutes()
+  if (isLateNight(at)) return 1.00                          // full price, no discount
+  const weekdayPeak = !isWeekend && (
+    (mins >= 7 * 60 && mins <= 9 * 60 + 15) ||              // 7:00-9:15am
+    (mins >= 16 * 60 && mins <= 18 * 60 + 30)               // 4:00-6:30pm
+  )
+  if (weekdayPeak) return 1.10                              // +10% commute-peak surcharge
+  if (isWeekend) return 0.85                                // weekend daytime: 15% off
+  return 0.95                                               // weekday off-peak daytime: 5% off
+}
+
+/**
+ * Fuel surcharge for the driver's trip TO the pickup. Added once a driver is
+ * matched (depends on that driver's live location). First 10km free, except
+ * late-night when every km is charged. 70c/km.
+ */
+export function driverPickupSurcharge(driverToPickupKm: number, at: Date = new Date()): number {
+  const freeKm = isLateNight(at) ? 0 : FREE_PICKUP_KM
+  const chargeableKm = Math.max(0, driverToPickupKm - freeKm)
+  return Math.round(chargeableKm * FUEL_RATE_PER_KM)
+}
 
 export interface PriceItem { size: ItemSize; label: string }
 
@@ -48,13 +98,15 @@ export interface PriceBreakdown {
   items: { label: string; fee: number; discounted: boolean; discountPercent: number }[]
   distanceSurcharge: number
   extraStopsFee: number
+  timeMultiplier: number
   driverFee: number
   serviceFee: number
   total: number
 }
 
-export function calculatePrice(items: PriceItem[], zone: DistanceZone, extraStops: ExtraStops = {}): PriceBreakdown {
-  if (items.length === 0) return { items: [], distanceSurcharge: 0, extraStopsFee: 0, driverFee: 0, serviceFee: SERVICE_FEE, total: SERVICE_FEE }
+export function calculatePrice(items: PriceItem[], zone: DistanceZone, extraStops: ExtraStops = {}, at: Date = new Date()): PriceBreakdown {
+  const timeMultiplier = pricingMultiplier(at)
+  if (items.length === 0) return { items: [], distanceSurcharge: 0, extraStopsFee: 0, timeMultiplier, driverFee: 0, serviceFee: SERVICE_FEE, total: SERVICE_FEE }
   const sizeOrder: ItemSize[] = ['medium', 'large', 'xlarge']
   const largestSize = items.reduce((max, item) =>
     sizeOrder.indexOf(item.size) > sizeOrder.indexOf(max) ? item.size : max, 'medium' as ItemSize)
@@ -68,8 +120,24 @@ export function calculatePrice(items: PriceItem[], zone: DistanceZone, extraStop
   })
   const itemsTotal = lineItems.reduce((sum, i) => sum + i.fee, 0)
   const extraStopsFee = (extraStops.secondPickup ? EXTRA_STOP_FEE : 0) + (extraStops.secondDropoff ? EXTRA_STOP_FEE : 0)
-  const driverFee = itemsTotal + distanceSurcharge + extraStopsFee
-  return { items: lineItems, distanceSurcharge, extraStopsFee, driverFee, serviceFee: SERVICE_FEE, total: driverFee + SERVICE_FEE }
+  // Time multiplier applies to delivery work (items + distance); extra stops are flat add-ons.
+  const adjusted = (itemsTotal + distanceSurcharge) * timeMultiplier + extraStopsFee
+  const driverFee = roundUpTo5(adjusted) // cash to driver, rounded UP to nearest $5
+  return { items: lineItems, distanceSurcharge, extraStopsFee, timeMultiplier, driverFee, serviceFee: SERVICE_FEE, total: driverFee + SERVICE_FEE }
+}
+
+/**
+ * Late buyer-cancellation charge (driver already near/at pickup).
+ * The platform keeps only a $0.99 connection fee (covers running costs, see T&Cs);
+ * the driver receives a $5 goodwill share of the service fee PLUS full fuel
+ * reimbursement for the trip they already made.
+ */
+export function lateBuyerCancellationCharge(driverToPickupKm: number, at: Date = new Date()): { buyerCharge: number; driverPayout: number; platformFee: number } {
+  const fuel = driverPickupSurcharge(driverToPickupKm, at)
+  const driverGoodwill = 5.00
+  const driverPayout = Math.round((driverGoodwill + fuel) * 100) / 100
+  const platformFee = PLATFORM_CONNECTION_FEE
+  return { buyerCharge: Math.round((driverPayout + platformFee) * 100) / 100, driverPayout, platformFee }
 }
 
 export function formatAUD(amount: number): string { return `$${Number.isInteger(amount) ? amount.toFixed(0) : amount.toFixed(2)}` }
