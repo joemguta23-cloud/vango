@@ -49,6 +49,7 @@ export const metadata: Metadata = {
       'max-video-preview': -1,
     },
   },
+  verification: { google: 'dyoSU1TriG1mmeYc18waERFOEYHmpXordDkWKc3lkCo' },
   category: 'Delivery Service',
 }
 
