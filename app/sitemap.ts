@@ -12,6 +12,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { path: '/signup?role=buyer', priority: 0.8, changeFrequency: 'monthly' },
     { path: '/signup?role=driver', priority: 0.8, changeFrequency: 'monthly' },
     { path: '/login', priority: 0.5, changeFrequency: 'monthly' },
+    { path: '/privacy', priority: 0.3, changeFrequency: 'monthly' },
   ]
 
   return routes.map((r) => ({
