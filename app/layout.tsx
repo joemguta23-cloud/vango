@@ -10,9 +10,10 @@ export const metadata: Metadata = {
     template: '%s | VanGo Melbourne',
   },
   description:
-    "VanGo is Melbourne's peer-to-peer delivery service for large Facebook Marketplace and Gumtree items — fridges, mattresses, couches and furniture — matched to a nearby ute or van driver in minutes. Servicing Melbourne and all of Victoria.",
+    "VanGo (Get VanGo) is Melbourne's peer-to-peer delivery service for large Facebook Marketplace and Gumtree items — fridges, mattresses, couches and furniture — matched to a nearby ute or van driver in minutes. Servicing Melbourne and all of Victoria.",
   keywords: [
     'VanGo', 'VanGo Melbourne', 'VanGo delivery', 'getvango', 'get vango',
+    'get van go', 'van go', 'van go delivery Melbourne', 'getvango go', 'vango melbourne delivery',
     'large item delivery Melbourne', 'furniture delivery Melbourne',
     'ute delivery Melbourne', 'van delivery Melbourne', 'fridge delivery Melbourne',
     'mattress delivery Melbourne', 'couch delivery Melbourne',
@@ -64,6 +65,7 @@ const JSON_LD = {
   '@type': 'LocalBusiness',
   '@id': `${SITE_URL}/#business`,
   name: 'VanGo',
+  alternateName: ['Get VanGo', 'GetVanGo', 'Get Van Go', 'Van Go', 'VanGo Melbourne'],
   legalName: 'Two Minute Van Pty Ltd',
   url: SITE_URL,
   description:
