@@ -136,6 +136,7 @@ export default function TrackingPage() {
   const statusIndex = STATUS_ORDER.indexOf(job.status)
   const showDriverLocation = LIVE_TRACKING_STATUSES.includes(job.status) && job.driver?.current_lat != null && job.driver?.current_lng != null
   const canCancel = FEATURE_FLAGS.CANCELLATION_ENABLED && CANCELLABLE_STATUSES.includes(job.status)
+  const alreadyRated = job.rating != null
 
   return (
     <div>
@@ -151,6 +152,16 @@ export default function TrackingPage() {
             </div>
           )}
         </div>
+
+        {job.status === 'delivered' && !alreadyRated && (
+          <a href={`/buyer/rate/${jobId}`}
+            className="block w-full text-center bg-orange-500 text-white font-bold py-3.5 rounded-xl mb-6 hover:bg-orange-600 transition-colors">
+            ⭐ Rate your delivery
+          </a>
+        )}
+        {job.status === 'delivered' && alreadyRated && (
+          <div className="text-center text-sm text-slate-500 mb-6">Thanks for rating your delivery 🙏</div>
+        )}
 
         <div className="card mb-4">
           <h2 className="font-bold text-sm text-slate-500 mb-4">Delivery progress</h2>
