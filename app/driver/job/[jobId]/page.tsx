@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Nav from '@/components/Nav'
 import MessageThread from '@/components/MessageThread'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
+import { haversineKm } from '@/lib/pricing'
 import type { Job } from '@/types'
 
 const NEXT_STATUS: Record<string, { status: string; label: string; note: string }> = {
@@ -66,7 +67,12 @@ export default function DriverJobPage() {
     const next = NEXT_STATUS[job.status]
     if (!next) return
     setUpdating(true)
-    await supabase.from('jobs').update({ status: next.status }).eq('id', jobId)
+    // Stamp the delivery-lifecycle timestamps so we can measure pickup ETA and
+    // total job time for the data-driven pricing analytics (see PRICING policy).
+    const patch: any = { status: next.status }
+    if (next.status === 'picked_up') patch.picked_up_at = new Date().toISOString()
+    if (next.status === 'delivered') patch.delivered_at = new Date().toISOString()
+    await supabase.from('jobs').update(patch).eq('id', jobId)
     await supabase.from('job_status_events').insert({
       job_id: jobId, status: next.status, note: next.note,
     })
@@ -84,12 +90,56 @@ export default function DriverJobPage() {
     setUpdating(false)
   }
 
+  // Drivers can cancel an accepted job. If they're already very close to the
+  // pickup, we warn them first (they're almost there). On cancel the job goes
+  // back into the pool as 'pending' for another driver to accept.
+  const cancelJob = async () => {
+    if (!job) return
+    const pLat = Number((job as any).pickup_lat)
+    const pLng = Number((job as any).pickup_lng)
+    const havePickupCoords = Number.isFinite(pLat) && Number.isFinite(pLng)
+
+    const ok = await new Promise<boolean>((resolve) => {
+      const plainMsg = 'Cancel this job? It will be offered to other drivers.'
+      if (!havePickupCoords || !('geolocation' in navigator)) return resolve(window.confirm(plainMsg))
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const km = haversineKm(pos.coords.latitude, pos.coords.longitude, pLat, pLng)
+          resolve(window.confirm(km < 3
+            ? `You're only ${km.toFixed(1)} km from the pickup -- you're almost there. Are you sure you want to cancel?`
+            : plainMsg))
+        },
+        () => resolve(window.confirm(plainMsg)),
+        { enableHighAccuracy: true, timeout: 8000 }
+      )
+    })
+    if (!ok) return
+
+    setUpdating(true)
+    await supabase.from('jobs').update({
+      driver_id: null,
+      status: 'pending',
+      cancelled_at: new Date().toISOString(),
+      cancellation_stage: 'driver',
+    } as any).eq('id', jobId)
+    await supabase.from('job_status_events').insert({
+      job_id: jobId, status: 'pending', note: 'Driver cancelled -- returned to pool',
+    })
+    if (job.driver_id) {
+      await supabase.from('drivers').update({
+        current_lat: null, current_lng: null, location_updated_at: null,
+      }).eq('id', job.driver_id)
+    }
+    router.push('/driver/dashboard')
+  }
+
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="text-5xl animate-bounce">Loading...</div></div>
   if (!job) return <div className="min-h-screen flex items-center justify-center">Job not found.</div>
 
   const nextAction = NEXT_STATUS[job.status]
   const showLocationBanner = LIVE_TRACKING_STATUSES.includes(job.status)
   const hasExtraStops = !!(job.second_pickup_address || job.second_dropoff_address)
+  const canCancel = job.status === 'accepted' || job.status === 'picked_up'
 
   return (
     <div>
@@ -190,6 +240,13 @@ export default function DriverJobPage() {
         <button onClick={() => router.push('/driver/dashboard')} className="btn-secondary w-full justify-center">
           Back to dashboard
         </button>
+
+        {canCancel && (
+          <button onClick={cancelJob} disabled={updating}
+            className="w-full text-sm text-red-500 font-semibold py-2 hover:text-red-600 transition-colors">
+            Cancel job
+          </button>
+        )}
       </div>
       {showMessages && <MessageThread jobId={jobId} onClose={() => setShowMessages(false)} />}
     </div>
