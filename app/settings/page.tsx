@@ -7,9 +7,15 @@ import { createSupabaseBrowserClient } from '@/lib/supabase'
 
 // Buyers and drivers can edit their own name/phone (and drivers their
 // vehicle details) here. Saves go straight through the Supabase client --
-// no API route needed, since RLS already lets a user update their own
-// `profiles` row (auth.uid() = id) and their own `drivers` row
-// (user_id = auth.uid()).
+// RLS lets a user update their own `profiles` row (auth.uid() = id) and
+// their own `drivers` row (user_id = auth.uid()).
+//
+// PRIVACY NOTE: the phone column in `profiles` is protected at the database
+// level (column-level grants — no client can SELECT another user's phone, or
+// even their own via the table). We therefore read the user's own phone from
+// their auth metadata, and keep BOTH the metadata and the profiles column in
+// sync on save (the profiles column stays the server-side source of truth
+// for VanGo internal use, e.g. future masked calling).
 const VEHICLE_TYPES = ['ute', 'van', 'truck']
 
 export default function SettingsPage() {
@@ -37,15 +43,17 @@ export default function SettingsPage() {
       if (!user) { router.push('/login'); return }
       setUserId(user.id)
 
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+      // Own phone comes from auth metadata (see privacy note above).
+      setPhone(user.user_metadata?.phone || '')
+
+      const { data: profile } = await supabase.from('profiles').select('full_name, role').eq('id', user.id).single()
       if (profile) {
         setRole(profile.role)
         setFullName(profile.full_name || '')
-        setPhone(profile.phone || '')
       }
 
       if (profile?.role === 'driver') {
-        const { data: driver } = await supabase.from('drivers').select('*').eq('user_id', user.id).single()
+        const { data: driver } = await supabase.from('drivers').select('vehicle_type, vehicle_make, vehicle_model, vehicle_plate').eq('user_id', user.id).single()
         if (driver) {
           setVehicleType(driver.vehicle_type || 'ute')
           setVehicleMake(driver.vehicle_make || '')
@@ -64,6 +72,8 @@ export default function SettingsPage() {
     setSaved(false)
     setError('')
 
+    // Keep the profiles row (server-side source of truth) and the auth
+    // metadata (what this page reads back) in sync.
     const { error: profileErr } = await supabase.from('profiles').update({
       full_name: fullName.trim(),
       phone: phone.trim(),
@@ -74,6 +84,8 @@ export default function SettingsPage() {
       setSaving(false)
       return
     }
+
+    await supabase.auth.updateUser({ data: { full_name: fullName.trim(), phone: phone.trim() } })
 
     if (role === 'driver') {
       const { error: driverErr } = await supabase.from('drivers').update({
@@ -117,6 +129,7 @@ export default function SettingsPage() {
             <label className="label">Phone</label>
             <input className="input" placeholder="e.g. 0412 345 678"
               value={phone} onChange={e => setPhone(e.target.value)} />
+            <p className="text-xs text-slate-400 mt-1">🔒 Your number is never shown to other users — contact happens through in-app chat.</p>
           </div>
 
           {role === 'driver' && (
