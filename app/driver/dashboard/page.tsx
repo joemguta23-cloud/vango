@@ -50,12 +50,16 @@ export default function DriverDashboardPage() {
   const loadData = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
-    const { data: d } = await supabase.from('drivers').select('*, profile:profiles(*)').eq('user_id', user.id).single()
+    // Privacy: only the profile fields the dashboard actually shows (never phone).
+    const { data: d } = await supabase.from('drivers').select('*, profile:profiles(id, full_name, role)').eq('user_id', user.id).single()
     if (!d) { router.push('/driver/onboard'); return }
     setDriver(d)
-    const { data: pending } = await supabase.from('jobs').select('*, buyer:profiles(*)').eq('status', 'pending').order('created_at', { ascending: false })
+    // No customer profile join here -- drivers don't need any customer
+    // personal details to decide on a job, and this keeps phone numbers and
+    // names out of the browser payload entirely.
+    const { data: pending } = await supabase.from('jobs').select('*').eq('status', 'pending').order('created_at', { ascending: false })
     setJobs(pending ?? [])
-    const { data: mine } = await supabase.from('jobs').select('*, buyer:profiles(*)').eq('driver_id', d.id).in('status', ['accepted', 'picked_up']).order('created_at', { ascending: false })
+    const { data: mine } = await supabase.from('jobs').select('*').eq('driver_id', d.id).in('status', ['accepted', 'picked_up']).order('created_at', { ascending: false })
     setMyJobs(mine ?? [])
     setLoading(false)
   }
@@ -227,6 +231,9 @@ export default function DriverDashboardPage() {
               )}
               {job.item_description && (
                 <div className="mb-3 text-sm text-slate-600">{job.item_description}</div>
+              )}
+              {job.helper_note && (
+                <div className="mb-3 text-xs text-slate-500">📝 {job.helper_note}</div>
               )}
               <div className="flex items-center gap-2 text-sm text-slate-600 mb-3">
                 <span>{job.pickup_address.split(',')[0]}</span>
