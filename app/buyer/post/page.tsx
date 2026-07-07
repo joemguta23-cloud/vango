@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Nav from '@/components/Nav'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
-import { calculatePrice, DISTANCE_ZONE_LABELS, SERVICE_FEE, EXTRA_STOP_FEE, haversineKm, kmToZone } from '@/lib/pricing'
+import { calculatePrice, SERVICE_FEE, EXTRA_STOP_FEE, DISTANCE_RATE_PER_KM, haversineKm, kmToZone } from '@/lib/pricing'
 import { FEATURE_FLAGS } from '@/lib/featureFlags'
 import AddressAutocomplete from '@/components/AddressAutocomplete'
 import type { ItemSize, JobItem, DistanceZone } from '@/types'
@@ -22,14 +22,15 @@ const ITEM_TYPES = [
 const ITEM_ICON: Record<string, string> = Object.fromEntries(ITEM_TYPES.map(i => [i.name, i.icon]))
 
 const SIZES: { key: ItemSize; name: string; desc: string }[] = [
-  { key: 'medium', name: 'Medium', desc: 'e.g. TV, desk chair' },
-  { key: 'large', name: 'Large', desc: 'e.g. fridge, couch' },
+  { key: 'small', name: 'Small', desc: 'boxes, packs, small misc — free' },
+  { key: 'medium', name: 'Medium', desc: 'e.g. TV, desk, chair' },
+  { key: 'large', name: 'Large', desc: 'e.g. fridge, couch, wardrobe' },
   { key: 'xlarge', name: 'X-Large', desc: 'e.g. piano, spa bath' },
 ]
 
 // -- Blank item template ----------------------------------------------------
 const blankItem = (): JobItem & { _photoFile?: File; _photoPreview?: string } => ({
-  item_type: '', item_size: 'large', description: '', photo_url: null,
+  item_type: '', item_size: 'medium', description: '', photo_url: null,
 })
 
 type DraftItem = JobItem & { _photoFile?: File; _photoPreview?: string }
@@ -42,6 +43,7 @@ export default function PostJobPage() {
   const [step, setStep] = useState(1)
   const [items, setItems] = useState<DraftItem[]>([blankItem()])
   const [editingItem, setEditingItem] = useState(0) // which item is being configured
+  const [triedContinue, setTriedContinue] = useState(false) // show validation errors after a failed Continue
 
   // Helper arrangements (buyer-side)
   const [helperAtPickup, setHelperAtPickup] = useState(false)
@@ -60,7 +62,7 @@ export default function PostJobPage() {
   const [schedule, setSchedule] = useState<'asap' | 'scheduled'>('asap')
   const [scheduledFor, setScheduledFor] = useState('')
 
-  // Multi-pickup / multi-dropoff (toggle + heavily discounted flat add-on fee)
+  // Multi-pickup / multi-dropoff (toggle + flat add-on fee)
   const [hasSecondPickup, setHasSecondPickup] = useState(false)
   const [secondPickup, setSecondPickup] = useState('')
   const [secondPickupLat, setSecondPickupLat] = useState<number | null>(null)
@@ -126,16 +128,17 @@ export default function PostJobPage() {
   }
 
   // Auto distance calculation -- straight-line (Haversine) km between pickup
-  // and dropoff coordinates captured by AddressAutocomplete, mapped to the
-  // existing 4-bucket pricing zone. No manual picker needed anymore.
+  // and dropoff coordinates captured by AddressAutocomplete. Charged at a flat
+  // per-km rate (no tiers shown to the customer anymore).
   const distanceKm = (pickupLat != null && pickupLng != null && dropoffLat != null && dropoffLng != null)
     ? haversineKm(pickupLat, pickupLng, dropoffLat, dropoffLng)
     : null
   const distanceZone: DistanceZone = distanceKm != null ? kmToZone(distanceKm) : 'under_15'
 
-  // Pricing preview
-  const priceItems = items.map(it => ({ size: it.item_size, label: `${it.item_type || 'Item'} (${it.item_size})` }))
-  const price = calculatePrice(priceItems, distanceZone, {
+  // Pricing preview -- pass the item TYPE so the engine can apply the
+  // "large-but-light -> medium" rule, and the real km for the flat per-km charge.
+  const priceItems = items.map(it => ({ size: it.item_size, label: `${it.item_type || 'Item'} (${it.item_size})`, type: it.item_type }))
+  const price = calculatePrice(priceItems, distanceKm ?? 0, {
     secondPickup: hasSecondPickup,
     secondDropoff: hasSecondDropoff,
   })
@@ -144,12 +147,25 @@ export default function PostJobPage() {
     : price.serviceFee
   const displayTotal = price.driverFee + discountedServiceFee
 
-  // Validation -- description is optional, only item type is required
-  const item1Valid = !!currentItem.item_type
-  const allItemsFilled = items.every(it => it.item_type)
+  // Validation -- BOTH an item type AND a description are now required for
+  // every item (a clear description is what the driver relies on).
+  const firstInvalidIdx = items.findIndex(it => !it.item_type || !it.description.trim())
+  const allItemsValid = firstInvalidIdx === -1
+  const typeMissing = triedContinue && !currentItem.item_type
+  const descMissing = triedContinue && !currentItem.description.trim()
   const locationValid = pickup && dropoff
     && (!hasSecondPickup || !!secondPickup)
     && (!hasSecondDropoff || !!secondDropoff)
+
+  const handleContinueFromItems = () => {
+    if (!allItemsValid) {
+      setEditingItem(firstInvalidIdx)
+      setTriedContinue(true)
+      return
+    }
+    setTriedContinue(false)
+    setStep(2)
+  }
 
   // -- Submit ------------------------------------------------------------
   const handleSubmit = async () => {
@@ -219,9 +235,9 @@ export default function PostJobPage() {
       job_id: job.id, status: 'pending', note: 'Job posted -- finding driver',
     })
 
-    // Charge the $12 VanGo service fee via Stripe Checkout (card / Apple Pay / Google Pay).
-    // The driver's fee stays cash-on-delivery. If Checkout can't be created for any reason,
-    // don't strand the buyer -- the job is already posted, so fall through to tracking.
+    // Charge the VanGo service fee via Stripe Checkout (card / Apple Pay / Google Pay).
+    // The driver's fee stays cash / PayID on delivery. If Checkout can't be created for any
+    // reason, don't strand the buyer -- the job is already posted, so fall through to tracking.
     try {
       const res = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
@@ -291,7 +307,7 @@ export default function PostJobPage() {
             {/* Item type picker */}
             <div>
               <label className="label">What are you moving? *</label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className={`grid grid-cols-3 gap-2 ${typeMissing ? 'ring-2 ring-red-400 rounded-xl p-1' : ''}`}>
                 {ITEM_TYPES.map(it => (
                   <button key={it.name} type="button"
                     onClick={() => setCurrentItem({ item_type: it.name })}
@@ -305,16 +321,17 @@ export default function PostJobPage() {
                   </button>
                 ))}
               </div>
+              {typeMissing && <p className="text-xs text-red-500 font-semibold mt-1.5">Please pick what you're moving.</p>}
             </div>
 
             {/* Size */}
             <div>
               <label className="label">How big is it? *</label>
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {SIZES.map(s => (
                   <button key={s.key} type="button"
                     onClick={() => setCurrentItem({ item_size: s.key })}
-                    className={`flex-1 border-2 rounded-xl py-3 px-2 text-center transition-all ${
+                    className={`border-2 rounded-xl py-3 px-2 text-center transition-all ${
                       currentItem.item_size === s.key
                         ? 'border-orange-500 bg-orange-50'
                         : 'border-slate-200 hover:border-orange-300 bg-white'
@@ -326,13 +343,25 @@ export default function PostJobPage() {
               </div>
             </div>
 
-            {/* Description */}
+            {/* Description -- now REQUIRED */}
             <div>
-              <label className="label">Describe the item (optional)</label>
-              <textarea className="input resize-none" rows={2}
-                placeholder={`e.g. "Samsung fridge 180cm, white, working. Narrow hallway at pickup."`}
+              <label className="label">Describe the item *</label>
+              <textarea
+                className={`input resize-none ${descMissing ? 'border-red-400 ring-2 ring-red-200' : ''}`}
+                rows={2}
+                placeholder={currentItem.item_type === 'Other'
+                  ? 'Required: tell the driver exactly what this is, rough weight & size.'
+                  : `e.g. "Samsung fridge 180cm, white, working. Narrow hallway at pickup."`}
                 value={currentItem.description}
                 onChange={e => setCurrentItem({ description: e.target.value })} />
+              {descMissing
+                ? <p className="text-xs text-red-500 font-semibold mt-1.5">A description is required so the driver knows what they're picking up.</p>
+                : <p className="text-xs text-slate-400 mt-1.5">Required. If you picked "Other", describe exactly what it is.</p>}
+            </div>
+
+            {/* Honesty / re-rate disclaimer */}
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5 text-xs text-amber-800">
+              ⚖️ <strong>Pick the size honestly.</strong> When the driver arrives and sees the item in person, they can adjust the size and price to match what's actually there. This is based on what the driver sees at pickup — not your photo. Deliberately choosing a smaller size to pay less will simply be corrected on the spot.
             </div>
 
             {/* Photo */}
@@ -364,17 +393,17 @@ export default function PostJobPage() {
             {/* Multi-item savings + ute-fit reminder */}
             {items.length > 1 && (
               <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800 space-y-1.5">
-                <div><span className="font-bold">🎉 Multi-item discount active:</span> your 2nd item is 50% cheaper and your 3rd+ items are 70% cheaper, because the driver is already making the trip.</div>
+                <div><span className="font-bold">🎉 Extra-item saving:</span> because the driver is already making the trip, each extra item from the <strong>same pickup</strong> is a flat +${EXTRA_ITEM_FEE_DISPLAY} — and small items are free.</div>
                 <div className="text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 -mx-1">
-                  🚐 <strong>Heads up:</strong> all items need to fit together in the back of a single ute at the same time. Please describe how they'll be packed (e.g. stacked, disassembled) in the notes below so the driver can confirm it'll fit before accepting.
+                  🚐 <strong>Heads up:</strong> all items need to fit together in the back of a single ute at the same time. Please describe how they'll be packed (e.g. stacked, disassembled) in each item's description so the driver can confirm it'll fit before accepting.
                 </div>
               </div>
             )}
 
             <div className="flex gap-3 pt-1">
               <button onClick={() => router.push('/')} className="btn-secondary flex-1 justify-center">← Back</button>
-              <button onClick={() => setStep(2)} disabled={!allItemsFilled}
-                className="btn-primary flex-[2] justify-center disabled:opacity-50">
+              <button onClick={handleContinueFromItems}
+                className="btn-primary flex-[2] justify-center">
                 Continue →
               </button>
             </div>
@@ -423,7 +452,7 @@ export default function PostJobPage() {
               </div>
 
               {/* Warning if no help ticked for a large item */}
-              {items.some(it => it.item_size !== 'medium') && !helperAtPickup && !helperAtDropoff && (
+              {items.some(it => it.item_size === 'large' || it.item_size === 'xlarge') && !helperAtPickup && !helperAtDropoff && (
                 <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-800">
                   ⚠️ <strong>Heads up:</strong> You've selected a large/heavy item. Drivers may decline jobs where no help is available at either end. Ticking one or both boxes significantly improves your match speed.
                 </div>
@@ -523,13 +552,13 @@ export default function PostJobPage() {
             </div>
 
             {/* Distance -- calculated automatically from the pickup/dropoff
-                coordinates captured by autocomplete above. */}
+                coordinates captured by autocomplete above. Flat per-km charge. */}
             <div>
               <label className="label">Distance (auto-calculated)</label>
               {distanceKm != null ? (
                 <div className="flex items-center gap-3 p-3 rounded-xl border-2 border-green-200 bg-green-50">
                   <span className="text-sm font-semibold text-green-800">
-                    📍 {distanceKm.toFixed(1)} km -- {DISTANCE_ZONE_LABELS[distanceZone]} pricing tier
+                    📍 {distanceKm.toFixed(1)} km · distance charge ${price.distanceFee}
                   </span>
                 </div>
               ) : (
@@ -578,15 +607,15 @@ export default function PostJobPage() {
                     <div key={i} className="flex justify-between items-center">
                       <span className="text-orange-700">
                         {item.label}
-                        {item.discounted && <span className="ml-1 text-xs text-green-600 font-semibold">({item.discountPercent}% multi-item discount)</span>}
+                        {item.isExtra && <span className="ml-1 text-xs text-green-600 font-semibold">(extra item)</span>}
                       </span>
-                      <span className="font-bold">${item.fee}</span>
+                      <span className="font-bold">{item.free ? 'Free' : `$${item.fee}`}</span>
                     </div>
                   ))}
-                  {price.distanceSurcharge > 0 && (
+                  {price.distanceFee > 0 && (
                     <div className="flex justify-between">
                       <span className="text-orange-700">Distance charge</span>
-                      <span className="font-bold">+${price.distanceSurcharge}</span>
+                      <span className="font-bold">+${price.distanceFee}</span>
                     </div>
                   )}
                   {price.extraStopsFee > 0 && (
@@ -612,12 +641,12 @@ export default function PostJobPage() {
                     <span className="text-orange-600">${displayTotal}</span>
                   </div>
                   <div className="flex justify-between text-xs text-orange-600">
-                    <span>Driver receives (cash on delivery)</span>
+                    <span>Driver receives (cash / PayID on delivery)</span>
                     <span className="font-bold">${price.driverFee}</span>
                   </div>
                 </div>
                 <p className="text-xs text-orange-600 mt-3">
-                  Pay <strong>${price.driverFee} cash</strong> to driver on delivery. The ${discountedServiceFee} service fee is charged to your card when you post.
+                  Pay <strong>${price.driverFee} by cash or PayID</strong> to the driver on delivery. The ${discountedServiceFee} service fee is charged to your card when you post.
                 </p>
               </div>
             )}
@@ -637,3 +666,6 @@ export default function PostJobPage() {
     </div>
   )
 }
+
+// Flat extra-item fee shown in the multi-item banner (keep in sync with lib/pricing.ts EXTRA_ITEM_FEE).
+const EXTRA_ITEM_FEE_DISPLAY = 10
