@@ -6,17 +6,27 @@ import Nav from '@/components/Nav'
 import MessageThread from '@/components/MessageThread'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
 import { haversineKm } from '@/lib/pricing'
-import type { Job } from '@/types'
+import type { Job, ItemSize } from '@/types'
 
 const NEXT_STATUS: Record<string, { status: string; label: string; note: string }> = {
-  accepted: { status: 'picked_up', label: 'Mark as Picked Up', note: 'Item collected from seller' },
-  picked_up: { status: 'delivered', label: 'Mark as Delivered', note: 'Item delivered to customer' },
+  accepted: { status: 'picked_up', label: 'Mark as Picked Up', note: 'Item collected from seller — pickup photo taken' },
+  picked_up: { status: 'delivered', label: 'Mark as Delivered', note: 'Item delivered to customer — delivery photo taken' },
+}
+
+// Proof-photo requirements per step (legal proof + customer notification):
+// the driver CANNOT progress the job without taking the photo.
+const PROOF_LABEL: Record<string, { title: string; hint: string; column: 'pickup_photo_url' | 'dropoff_photo_url' }> = {
+  accepted: { title: '📸 Photo of the loaded item', hint: 'Take a photo of the item secured on your vehicle before marking as picked up. This protects you and notifies the customer.', column: 'pickup_photo_url' },
+  picked_up: { title: '📸 Photo at the dropoff', hint: 'Take a photo of the item at the delivery point before marking as delivered. This is your proof of delivery.', column: 'dropoff_photo_url' },
 }
 
 // Statuses during which this driver's live location should be broadcast to
 // the customer. Location sharing stops the moment the job leaves this set
 // (delivered, or the effect cleans up on unmount) -- for privacy.
 const LIVE_TRACKING_STATUSES = ['accepted', 'picked_up']
+
+const SIZE_LABEL: Record<string, string> = { small: 'Small', medium: 'Medium', large: 'Large', xlarge: 'X-Large' }
+const SIZE_ORDER = ['small', 'medium', 'large', 'xlarge']
 
 export default function DriverJobPage() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -28,10 +38,20 @@ export default function DriverJobPage() {
   const [locationSharing, setLocationSharing] = useState<'idle' | 'active' | 'denied' | 'unsupported'>('idle')
   const [showMessages, setShowMessages] = useState(false)
 
-  useEffect(() => {
-    supabase.from('jobs').select('*, buyer:profiles(*)').eq('id', jobId).single()
+  // Proof photo (required to advance the job)
+  const [proofFile, setProofFile] = useState<File | null>(null)
+  const [proofPreview, setProofPreview] = useState<string | null>(null)
+
+  // Driver price re-rate at pickup (item bigger than described)
+  const [showAdjust, setShowAdjust] = useState(false)
+  const [adjusting, setAdjusting] = useState(false)
+  const [adjustError, setAdjustError] = useState('')
+
+  const fetchJob = () =>
+    supabase.from('jobs').select('*, buyer:profiles(full_name)').eq('id', jobId).single()
       .then(({ data }) => { setJob(data as Job); setLoading(false) })
-  }, [jobId])
+
+  useEffect(() => { fetchJob() }, [jobId])
 
   // Share this driver's live GPS position while the job is actively out for
   // delivery, so the customer can see the driver approaching on the map (like
@@ -62,20 +82,53 @@ export default function DriverJobPage() {
     return () => navigator.geolocation.clearWatch(watchId)
   }, [job?.status, job?.driver_id])
 
+  const handleProofChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setProofFile(file)
+    setProofPreview(URL.createObjectURL(file))
+  }
+
   const advanceStatus = async () => {
     if (!job) return
     const next = NEXT_STATUS[job.status]
+    const proof = PROOF_LABEL[job.status]
     if (!next) return
+    // Photo-gated: no proof photo, no progress.
+    if (proof && !proofFile) return
     setUpdating(true)
+
+    // Upload the proof photo to the public job-photos bucket first.
+    let proofUrl: string | null = null
+    if (proof && proofFile) {
+      const ext = proofFile.name.split('.').pop() || 'jpg'
+      const path = `proof/${jobId}/${proof.column === 'pickup_photo_url' ? 'pickup' : 'dropoff'}-${Date.now()}.${ext}`
+      const { data: up, error: upErr } = await supabase.storage.from('job-photos').upload(path, proofFile)
+      if (upErr || !up) {
+        alert('Could not upload the photo — check your connection and try again.')
+        setUpdating(false)
+        return
+      }
+      const { data: { publicUrl } } = supabase.storage.from('job-photos').getPublicUrl(path)
+      proofUrl = publicUrl
+    }
+
     // Stamp the delivery-lifecycle timestamps so we can measure pickup ETA and
     // total job time for the data-driven pricing analytics (see PRICING policy).
     const patch: any = { status: next.status }
-    if (next.status === 'picked_up') patch.picked_up_at = new Date().toISOString()
-    if (next.status === 'delivered') patch.delivered_at = new Date().toISOString()
-    await supabase.from('jobs').update(patch).eq('id', jobId)
+    if (next.status === 'picked_up') { patch.picked_up_at = new Date().toISOString(); patch.pickup_photo_url = proofUrl }
+    if (next.status === 'delivered') { patch.delivered_at = new Date().toISOString(); patch.dropoff_photo_url = proofUrl }
+    const { error: updErr } = await supabase.from('jobs').update(patch).eq('id', jobId)
+    if (updErr) {
+      alert('Could not update the job — please try again.')
+      setUpdating(false)
+      return
+    }
     await supabase.from('job_status_events').insert({
       job_id: jobId, status: next.status, note: next.note,
     })
+    setProofFile(null)
+    setProofPreview(null)
     if (next.status === 'delivered') {
       // Privacy: stop showing this driver's location to anyone once the job is done.
       if (job.driver_id) {
@@ -88,6 +141,31 @@ export default function DriverJobPage() {
       setJob(j => j ? { ...j, status: next.status as any } : j)
     }
     setUpdating(false)
+  }
+
+  // Driver re-rate at pickup: the item in person is bigger/heavier than
+  // described. Goes through a server route (never a direct client update of
+  // driver_fee) so the change is validated, logged and shown to the customer.
+  const adjustSize = async (newSize: ItemSize) => {
+    if (!job) return
+    setAdjusting(true)
+    setAdjustError('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/jobs/adjust-price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+        body: JSON.stringify({ jobId, newSize }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setAdjustError(data.error || 'Could not adjust the price.'); setAdjusting(false); return }
+      await fetchJob()
+      setShowAdjust(false)
+      alert(`Size updated to ${SIZE_LABEL[newSize]}. New cash fee: $${data.driverFee}. The customer has been notified on their tracking page.`)
+    } catch {
+      setAdjustError('Could not adjust the price — check your connection.')
+    }
+    setAdjusting(false)
   }
 
   // Drivers can cancel an accepted job. If they're already very close to the
@@ -137,9 +215,12 @@ export default function DriverJobPage() {
   if (!job) return <div className="min-h-screen flex items-center justify-center">Job not found.</div>
 
   const nextAction = NEXT_STATUS[job.status]
+  const proofNeeded = PROOF_LABEL[job.status]
   const showLocationBanner = LIVE_TRACKING_STATUSES.includes(job.status)
   const hasExtraStops = !!(job.second_pickup_address || job.second_dropoff_address)
   const canCancel = job.status === 'accepted' || job.status === 'picked_up'
+  const canAdjust = job.status === 'accepted' || job.status === 'picked_up'
+  const biggerSizes = SIZE_ORDER.slice(SIZE_ORDER.indexOf(job.item_size) + 1) as ItemSize[]
   const itemPhotos = (Array.isArray((job as any).items) ? (job as any).items.map((it: any) => it?.photo_url) : [job.photo_url]).filter(Boolean)
 
   return (
@@ -205,8 +286,9 @@ export default function DriverJobPage() {
 
         <div className="card">
           <h2 className="font-bold text-sm text-slate-500 mb-3">Item</h2>
-          <div className="text-base font-bold mb-1">{job.item_type} <span className="text-slate-400 font-normal text-sm">({job.item_size})</span></div>
+          <div className="text-base font-bold mb-1">{job.item_type} <span className="text-slate-400 font-normal text-sm">({SIZE_LABEL[job.item_size] ?? job.item_size})</span></div>
           <p className="text-sm text-slate-600">{job.item_description}</p>
+          {job.helper_note && <p className="text-xs text-slate-500 mt-2">📝 {job.helper_note}</p>}
           {itemPhotos.length > 0 && (
             <div className="flex gap-2 mt-3 overflow-x-auto">
               {itemPhotos.map((url: string, idx: number) => (
@@ -221,12 +303,9 @@ export default function DriverJobPage() {
           <div className="flex items-center justify-between gap-2">
             <div>
               <div className="font-bold">{job.buyer?.full_name}</div>
-              <div className="text-xs text-slate-400">Number kept private — use the buttons to reach them</div>
+              <div className="text-xs text-slate-400">Phone numbers stay private — all contact happens in the chat</div>
             </div>
-            <div className="flex gap-2">
-              <button onClick={() => setShowMessages(true)} className="bg-blue-100 text-blue-700 font-semibold px-4 py-2 rounded-xl text-sm hover:bg-blue-200 transition-colors">Message</button>
-              <a href={`tel:${job.buyer?.phone}`} className="bg-green-100 text-green-700 font-semibold px-4 py-2 rounded-xl text-sm hover:bg-green-200 transition-colors">Call Customer</a>
-            </div>
+            <button onClick={() => setShowMessages(true)} className="bg-blue-100 text-blue-700 font-semibold px-4 py-2 rounded-xl text-sm hover:bg-blue-200 transition-colors">💬 Message</button>
           </div>
         </div>
 
@@ -235,10 +314,58 @@ export default function DriverJobPage() {
           <div className="text-orange-700">Collect <strong>${job.driver_fee}</strong> by <strong>cash or PayID</strong> from the customer when you hand over the item.</div>
         </div>
 
+        {/* Driver re-rate: item bigger than described */}
+        {canAdjust && biggerSizes.length > 0 && (
+          <div className="card border-amber-200">
+            {!showAdjust ? (
+              <button onClick={() => setShowAdjust(true)}
+                className="w-full text-sm font-semibold text-amber-700 py-1 text-left">
+                ⚖️ Item bigger than described? Adjust the size →
+              </button>
+            ) : (
+              <div>
+                <div className="font-bold text-sm text-slate-700 mb-1">Re-rate this item</div>
+                <p className="text-xs text-slate-500 mb-3">Only use this when the real item is clearly bigger/heavier than what was posted. The customer is notified and the change is logged.</p>
+                <div className="flex gap-2">
+                  {biggerSizes.map(s => (
+                    <button key={s} onClick={() => adjustSize(s)} disabled={adjusting}
+                      className="flex-1 border-2 border-slate-200 hover:border-amber-400 rounded-xl py-2.5 text-sm font-bold text-slate-700 transition-all disabled:opacity-50">
+                      {SIZE_LABEL[s]}
+                    </button>
+                  ))}
+                </div>
+                {adjustError && <p className="text-xs text-red-500 font-semibold mt-2">{adjustError}</p>}
+                <button onClick={() => { setShowAdjust(false); setAdjustError('') }} className="text-xs text-slate-400 mt-2">Cancel</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Proof photo (REQUIRED to advance the job) */}
+        {nextAction && proofNeeded && (
+          <div className="card border-blue-200">
+            <div className="font-bold text-sm text-slate-700 mb-1">{proofNeeded.title} <span className="text-red-500">*</span></div>
+            <p className="text-xs text-slate-500 mb-3">{proofNeeded.hint}</p>
+            {!proofPreview ? (
+              <label className="border-2 border-dashed border-blue-200 hover:border-blue-400 hover:bg-blue-50 rounded-xl p-6 flex flex-col items-center cursor-pointer transition-all bg-slate-50">
+                <span className="text-3xl mb-1">📷</span>
+                <span className="text-sm font-semibold text-blue-600">Take photo</span>
+                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleProofChange} />
+              </label>
+            ) : (
+              <div className="relative rounded-xl overflow-hidden h-40 bg-slate-100">
+                <img src={proofPreview} alt="Proof" className="w-full h-full object-cover" />
+                <button onClick={() => { setProofFile(null); setProofPreview(null) }}
+                  className="absolute top-2 right-2 w-7 h-7 bg-black/50 text-white rounded-full flex items-center justify-center text-sm">×</button>
+              </div>
+            )}
+          </div>
+        )}
+
         {nextAction && (
-          <button onClick={advanceStatus} disabled={updating}
-            className="btn-primary w-full justify-center py-3.5 text-base">
-            {updating ? 'Updating...' : nextAction.label}
+          <button onClick={advanceStatus} disabled={updating || (proofNeeded && !proofFile)}
+            className="btn-primary w-full justify-center py-3.5 text-base disabled:opacity-50">
+            {updating ? 'Updating...' : (proofNeeded && !proofFile) ? '📸 Take the photo first' : nextAction.label}
           </button>
         )}
 
