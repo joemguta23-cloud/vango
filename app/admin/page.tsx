@@ -1,28 +1,48 @@
 'use client'
 export const dynamic = 'force-dynamic'
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
 import type { Job, Driver } from '@/types'
 import Link from 'next/link'
 
+// SECURITY: this page verifies the signed-in user has role='admin' before
+// loading anything, and redirects everyone else. Data access is additionally
+// enforced by RLS admin policies (see supabase/migration_005) — without
+// them a non-admin would see nothing here anyway, but the gate keeps the
+// page itself from ever rendering for the wrong audience.
+// Phone numbers are NOT shown: the phone column is protected at the DB level.
+// Look drivers up in the Supabase dashboard if you ever need to call one.
 export default function AdminPage() {
+  const router = useRouter()
   const supabase = createSupabaseBrowserClient()
   const [jobs, setJobs] = useState<Job[]>([])
   const [drivers, setDrivers] = useState<any[]>([])
   const [tab, setTab] = useState<'jobs'|'drivers'|'pending'>('jobs')
   const [loading, setLoading] = useState(true)
+  const [authorised, setAuthorised] = useState(false)
 
   const loadData = () =>
     Promise.all([
-      supabase.from('jobs').select('*, buyer:profiles(*), driver:drivers(*, profile:profiles(*))').order('created_at', { ascending: false }).limit(50),
-      supabase.from('drivers').select('*, profile:profiles(*)').order('created_at', { ascending: false }),
+      supabase.from('jobs').select('*, buyer:profiles(id, full_name), driver:drivers(*, profile:profiles(id, full_name))').order('created_at', { ascending: false }).limit(50),
+      supabase.from('drivers').select('*, profile:profiles(id, full_name, role, created_at)').order('created_at', { ascending: false }),
     ]).then(([{ data: j }, { data: d }]) => {
       setJobs((j ?? []) as Job[])
       setDrivers(d ?? [])
       setLoading(false)
     })
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => {
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { router.replace('/login'); return }
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+      if (profile?.role !== 'admin') { router.replace('/'); return }
+      setAuthorised(true)
+      loadData()
+    }
+    init()
+  }, [])
 
   const approve = async (driverId: string) => {
     await supabase.from('drivers').update({ is_approved: true }).eq('id', driverId)
@@ -40,14 +60,13 @@ export default function AdminPage() {
   const approvedDrivers = drivers.filter(d => d.is_approved)
   const todayFees = jobs.filter(j => j.status === 'delivered' && new Date(j.created_at).toDateString() === new Date().toDateString())
                       .reduce((sum, j) => sum + Number(j.service_fee), 0)
-  const todayDone = jobs.filter(j => j.status === 'delivered' && new Date(j.created_at).toDateString() === new Date().toDateString()).length
 
   const STATUS_BADGE: Record<string, string> = {
     pending: 'badge-orange', accepted: 'badge-blue',
     picked_up: 'badge-blue', delivered: 'badge-green', cancelled: 'badge-slate',
   }
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="text-5xl animate-bounce">⚙️</div></div>
+  if (loading || !authorised) return <div className="min-h-screen flex items-center justify-center"><div className="text-5xl animate-bounce">⚙️</div></div>
 
   return (
     <div className="flex min-h-screen">
@@ -110,7 +129,7 @@ export default function AdminPage() {
                   </div>
                   <div>
                     <div className="font-bold">{d.profile?.full_name}</div>
-                    <div className="text-sm text-slate-500">{d.profile?.phone} · ABN: {d.abn || '—'} · Licence: {d.license_number || '—'}</div>
+                    <div className="text-sm text-slate-500">ABN: {d.abn || '—'} · Licence: {d.license_number || '—'}</div>
                     <div className="text-sm text-slate-500">🚐 {d.vehicle_type} — {d.vehicle_make} {d.vehicle_model} · {d.vehicle_plate}</div>
                   </div>
                 </div>
@@ -202,3 +221,4 @@ export default function AdminPage() {
     </div>
   )
 }
+0
