@@ -36,7 +36,12 @@ export default function Nav() {
         <div className="hidden sm:flex items-center gap-3">
           {profile ? (
             <>
-              {profile.role === 'buyer' && <Link href="/buyer/post" className="btn-primary py-2 px-4 text-sm">📦 Post a Job</Link>}
+              {profile.role === 'buyer' && (
+                <>
+                  <Link href="/buyer/dashboard" className="btn-secondary py-2 px-4 text-sm">📋 My Jobs</Link>
+                  <Link href="/buyer/post" className="btn-primary py-2 px-4 text-sm">📦 Post a Job</Link>
+                </>
+              )}
               {profile.role === 'driver' && <Link href="/driver/dashboard" className="btn-primary py-2 px-4 text-sm">🚐 My Jobs</Link>}
               {profile.role === 'admin' && <Link href="/admin" className="btn-secondary py-2 px-4 text-sm">⚙️ Admin</Link>}
               <Link href="/settings" className="btn-secondary py-2 px-4 text-sm">⚙️ Settings</Link>
@@ -63,7 +68,12 @@ export default function Nav() {
         <div className="sm:hidden absolute top-16 inset-x-0 bg-white border-b border-slate-200 shadow-lg px-4 py-4 flex flex-col gap-3">
           {profile ? (
             <>
-              {profile.role === 'buyer' && <Link href="/buyer/post" onClick={() => setMenuOpen(false)} className="btn-primary justify-center">📦 Post a Job</Link>}
+              {profile.role === 'buyer' && (
+                <>
+                  <Link href="/buyer/dashboard" onClick={() => setMenuOpen(false)} className="btn-secondary justify-center">📋 My Jobs</Link>
+                  <Link href="/buyer/post" onClick={() => setMenuOpen(false)} className="btn-primary justify-center">📦 Post a Job</Link>
+                </>
+              )}
               {profile.role === 'driver' && <Link href="/driver/dashboard" onClick={() => setMenuOpen(false)} className="btn-primary justify-center">🚐 My Jobs</Link>}
               {profile.role === 'admin' && <Link href="/admin" onClick={() => setMenuOpen(false)} className="btn-secondary justify-center">⚙️ Admin</Link>}
               <Link href="/settings" onClick={() => setMenuOpen(false)} className="btn-secondary justify-center">⚙️ Settings</Link>
