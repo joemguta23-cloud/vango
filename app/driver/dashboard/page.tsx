@@ -12,6 +12,15 @@ const ITEM_ICONS: Record<string, string> = {
   'Tools':'Tools','Garden':'Garden','Materials':'Materials','Other':'Item',
 }
 
+// Collect every item photo on a job (multi-item jobs carry a photo per item),
+// falling back to the legacy single photo_url. Drivers need to SEE what they're
+// picking up before they accept, so we show these thumbnails on the card.
+function jobPhotos(job: any): string[] {
+  const fromItems = Array.isArray(job.items) ? job.items.map((it: any) => it?.photo_url) : []
+  const all = [...fromItems, job.photo_url].filter(Boolean)
+  return Array.from(new Set(all))
+}
+
 // How often to re-fetch jobs as a fallback in case the realtime websocket
 // silently drops (mobile backgrounding, network switch, etc). Realtime is
 // still the primary/fast path -- this just guarantees drivers never go more
@@ -129,18 +138,26 @@ export default function DriverDashboardPage() {
         {myJobs.length > 0 && (
           <div className="mb-8">
             <h2 className="font-bold text-base mb-3">Active jobs</h2>
-            {myJobs.map(job => (
-              <div key={job.id} className="card mb-3 border-orange-200 bg-orange-50 cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => router.push(`/driver/job/${job.id}`)}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-bold">{job.item_type}</div>
-                    <div className="text-xs text-slate-500">{job.pickup_address} to {job.dropoff_address}</div>
+            {myJobs.map(job => {
+              const photos = jobPhotos(job)
+              return (
+                <div key={job.id} className="card mb-3 border-orange-200 bg-orange-50 cursor-pointer hover:shadow-md transition-shadow"
+                  onClick={() => router.push(`/driver/job/${job.id}`)}>
+                  <div className="flex items-center gap-3">
+                    {photos[0]
+                      ? <img src={photos[0]} alt="Item" className="w-14 h-14 rounded-lg object-cover flex-shrink-0 border border-orange-200" />
+                      : <div className="w-14 h-14 rounded-lg bg-orange-100 flex items-center justify-center text-xl flex-shrink-0">📦</div>}
+                    <div className="flex items-center justify-between flex-1 min-w-0">
+                      <div className="min-w-0">
+                        <div className="font-bold">{job.item_type}</div>
+                        <div className="text-xs text-slate-500 truncate">{job.pickup_address} to {job.dropoff_address}</div>
+                      </div>
+                      <span className="badge-orange flex-shrink-0 ml-2">{job.status === 'accepted' ? 'Heading to pickup' : 'Item collected'}</span>
+                    </div>
                   </div>
-                  <span className="badge-orange">{job.status === 'accepted' ? 'Heading to pickup' : 'Item collected'}</span>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
 
@@ -171,6 +188,7 @@ export default function DriverDashboardPage() {
 
         {driver?.is_online && jobs.map(job => {
           const itemCount = Array.isArray((job as any).items) ? (job as any).items.length : 1
+          const photos = jobPhotos(job)
           return (
             <div key={job.id} className="card mb-3 hover:border-orange-300 hover:shadow-md transition-all cursor-pointer">
               <div className="flex items-start justify-between mb-3">
@@ -185,13 +203,30 @@ export default function DriverDashboardPage() {
                 </div>
                 <div className="text-right">
                   <div className="text-xl font-black">${job.driver_fee}</div>
-                  <div className="text-xs text-slate-400">cash</div>
+                  <div className="text-xs text-slate-400">cash / PayID</div>
                 </div>
               </div>
+
+              {/* Item photo(s) -- so the driver can see exactly what they're picking up */}
+              {photos.length > 0 ? (
+                <div className="flex gap-2 mb-3 overflow-x-auto">
+                  {photos.map((url, idx) => (
+                    <img key={idx} src={url} alt="Item to deliver" className="h-32 w-40 object-cover rounded-lg flex-shrink-0 border border-slate-200" loading="lazy" />
+                  ))}
+                </div>
+              ) : (
+                <div className="mb-3 text-xs text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-lg px-3 py-2">
+                  📷 No photo provided — check the description before accepting.
+                </div>
+              )}
+
               {itemCount > 1 && (
                 <div className="mb-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
                   ⚠️ Multiple items -- check they'll all fit in your vehicle before accepting.
                 </div>
+              )}
+              {job.item_description && (
+                <div className="mb-3 text-sm text-slate-600">{job.item_description}</div>
               )}
               <div className="flex items-center gap-2 text-sm text-slate-600 mb-3">
                 <span>{job.pickup_address.split(',')[0]}</span>
