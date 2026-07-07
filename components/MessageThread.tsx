@@ -7,6 +7,14 @@ import { createSupabaseBrowserClient } from '@/lib/supabase'
 // Access control is enforced by the job_messages RLS policies -- only the
 // job's buyer or assigned driver can read/send. Includes Block + Report
 // for user safety (records to chat_safety_actions for VanGo review).
+//
+// Latency design (feels instant, no manual refresh needed):
+//  - Sending appends the message to the local list immediately (optimistic),
+//    so the sender sees it the moment they hit Send.
+//  - Incoming messages arrive via a realtime subscription AND a short 2s
+//    poll fallback, so the other side shows up within ~2s even if the
+//    websocket is slow or drops. fetchMessages replaces the full list, so
+//    the optimistic copy reconciles with the server row (deduped by id).
 export default function MessageThread({ jobId, onClose }: { jobId: string; onClose: () => void }) {
   const supabase = createSupabaseBrowserClient()
   const [messages, setMessages] = useState<any[]>([])
@@ -27,7 +35,15 @@ export default function MessageThread({ jobId, onClose }: { jobId: string; onClo
       .select('*, sender:profiles(full_name)')
       .eq('job_id', jobId)
       .order('created_at', { ascending: true })
-    setMessages(data ?? [])
+    if (data) {
+      // Merge: keep any optimistic messages not yet returned by the server,
+      // so a just-sent message never flickers out between poll cycles.
+      setMessages(prev => {
+        const serverIds = new Set(data.map((m: any) => m.id))
+        const pendingLocal = prev.filter((m: any) => m.__optimistic && !serverIds.has(m.id))
+        return [...data, ...pendingLocal]
+      })
+    }
     setLoading(false)
   }
 
@@ -37,7 +53,10 @@ export default function MessageThread({ jobId, onClose }: { jobId: string; onClo
       .channel(`job-messages-${jobId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_messages', filter: `job_id=eq.${jobId}` }, fetchMessages)
       .subscribe()
-    return () => { supabase.removeChannel(channel) }
+    // Poll fallback so incoming messages appear within ~2s even if the
+    // realtime websocket is slow or silently drops.
+    const poll = setInterval(fetchMessages, 2000)
+    return () => { supabase.removeChannel(channel); clearInterval(poll) }
   }, [jobId])
 
   useEffect(() => {
@@ -57,8 +76,26 @@ export default function MessageThread({ jobId, onClose }: { jobId: string; onClo
     if (!text || !userId || sending || blocked) return
     setSending(true)
     setBody('')
-    const { error } = await supabase.from('job_messages').insert({ job_id: jobId, sender_id: userId, body: text })
-    if (error) setBody(text) // put it back so nothing is silently lost
+    // Optimistic: show the message instantly with a temporary id.
+    const tempId = `temp-${Date.now()}`
+    const optimistic = { id: tempId, job_id: jobId, sender_id: userId, body: text, created_at: new Date().toISOString(), __optimistic: true }
+    setMessages(prev => [...prev, optimistic])
+    const { data, error } = await supabase
+      .from('job_messages')
+      .insert({ job_id: jobId, sender_id: userId, body: text })
+      .select('*, sender:profiles(full_name)')
+      .single()
+    if (error) {
+      // Roll back the optimistic message and restore the text so nothing is lost.
+      setMessages(prev => prev.filter(m => m.id !== tempId))
+      setBody(text)
+    } else if (data) {
+      // Swap the temp message for the real row (deduped by id).
+      setMessages(prev => {
+        const withoutTemp = prev.filter(m => m.id !== tempId && m.id !== data.id)
+        return [...withoutTemp, data]
+      })
+    }
     setSending(false)
   }
 
@@ -67,7 +104,7 @@ export default function MessageThread({ jobId, onClose }: { jobId: string; onClo
     const reason = window.prompt('Report this message to VanGo. Briefly, what is wrong? (optional)')
     if (reason === null) return // cancelled
     await supabase.from('chat_safety_actions').insert({
-      job_id: jobId, actor_id: userId, target_user_id: m.sender_id, message_id: m.id, action_type: 'report', note: reason || null,
+      job_id: jobId, actor_id: userId, target_user_id: m.sender_id, message_id: m.__optimistic ? null : m.id, action_type: 'report', note: reason || null,
     })
     window.alert('Thanks -- this message has been reported to VanGo for review.')
   }
@@ -109,8 +146,9 @@ export default function MessageThread({ jobId, onClose }: { jobId: string; onClo
                     <div className="text-[10px] font-bold opacity-70 mb-0.5">{m.sender?.full_name || 'them'}</div>
                   )}
                   <div className="whitespace-pre-wrap break-words">{m.body}</div>
-                  <div className={`text-[10px] mt-0.5 ${m.sender_id === userId ? 'text-orange-100' : 'text-slate-400'}`}>
+                  <div className={`text-[10px] mt-0.5 flex items-center gap-1 ${m.sender_id === userId ? 'text-orange-100' : 'text-slate-400'}`}>
                     {new Date(m.created_at).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })}
+                    {m.__optimistic && m.sender_id === userId && <span>· sending…</span>}
                   </div>
                 </div>
                 {m.sender_id !== userId && (
