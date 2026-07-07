@@ -23,10 +23,9 @@ export async function POST(req: NextRequest) {
     const jobId = pi.metadata?.job_id
     if (!jobId) return NextResponse.json({ received: true })
 
-    // Fetch job + driver details
     const { data: job } = await supabase
       .from('jobs')
-      .select('id, driver_id, buyer_id, driver_fee, discount_code_id, drivers(stripe_account_id, stripe_onboarded)')
+      .select('id, driver_id, buyer_id, driver_fee, discount_code_id')
       .eq('id', jobId)
       .single()
 
@@ -60,22 +59,13 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Auto-transfer driver fee if driver has Connect account
-      const driver = Array.isArray(job.drivers) ? job.drivers[0] : job.drivers as any
-      if (driver?.stripe_account_id && driver?.stripe_onboarded) {
-        const driverFeeCents = Math.round(Number(job.driver_fee) * 100)
-        try {
-          await stripe.transfers.create({
-            amount: driverFeeCents,
-            currency: 'aud',
-            destination: driver.stripe_account_id,
-            transfer_group: jobId,
-            metadata: { job_id: jobId },
-          })
-        } catch (transferErr: any) {
-          console.error('Transfer failed:', transferErr.message)
-        }
-      }
+      // NOTE (removed): this webhook previously auto-created a Stripe
+      // transfer of the full driver_fee to the driver's Connect account on
+      // every successful service-fee payment. That double-paid drivers (they
+      // already collect the fee in cash/PayID on delivery) and drained the
+      // platform balance -- the buyer only ever pays the ~$12 service fee by
+      // card. If card-paid driver fees are introduced later, re-add a
+      // transfer that is funded by an actual charge for that amount.
 
       // Notify buyer
       if (job.buyer_id) {
