@@ -1,4 +1,4 @@
-'use client'
+undefined'use client'
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Nav from '@/components/Nav'
