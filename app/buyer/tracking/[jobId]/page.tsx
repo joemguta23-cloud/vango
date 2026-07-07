@@ -10,7 +10,7 @@ const STATUS_LABELS = {
   pending: { label: 'Finding driver', icon: '🔍', msg: "We're matching you with the nearest available driver..." },
   accepted: { label: 'Driver on the way', icon: '🚐', msg: 'Your driver has accepted and is heading to the seller.' },
   picked_up: { label: 'Item collected', icon: '📦', msg: 'Your item has been picked up and is on its way to you.' },
-  delivered: { label: 'Delivered!', icon: '✅', msg: '🎉 Your item has been delivered. Please pay the driver the agreed cash amount.' },
+  delivered: { label: 'Delivered!', icon: '✅', msg: '🎉 Your item has been delivered. Please pay the driver the agreed amount by cash or PayID.' },
   cancelled: { label: 'Cancelled', icon: '❌', msg: 'This job was cancelled.' },
 }
 const STATUS_ORDER = ['pending', 'accepted', 'picked_up', 'delivered']
@@ -260,6 +260,7 @@ export default function TrackingPage() {
               <a href={`tel:${job.driver.profile?.phone}`} className="flex-1 bg-green-100 text-green-700 font-semibold py-2.5 rounded-xl text-sm text-center hover:bg-green-200 transition-colors">📞 Call driver</a>
               <button onClick={() => setShowMessages(true)} className="flex-1 bg-blue-100 text-blue-700 font-semibold py-2.5 rounded-xl text-sm hover:bg-blue-200 transition-colors">💬 Message</button>
             </div>
+            <p className="text-xs text-slate-400 mt-2 text-center">The driver's number stays private — tap Call to connect.</p>
           </div>
         )}
 
@@ -270,7 +271,7 @@ export default function TrackingPage() {
               { label: 'Item', value: `${job.item_type} (${job.item_size})` },
               { label: 'Pickup', value: job.pickup_address },
               { label: 'Dropoff', value: job.dropoff_address },
-              { label: 'Driver fee', value: `$${job.driver_fee} cash on delivery` },
+              { label: 'Driver fee', value: `$${job.driver_fee} — cash or PayID on delivery` },
               { label: 'Service fee', value: `$${job.service_fee}` },
             ].map(r => (
               <div key={r.label} className="flex justify-between py-1.5 border-b border-slate-100 last:border-0">
