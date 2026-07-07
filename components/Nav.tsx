@@ -13,7 +13,9 @@ export default function Nav() {
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return
-      const { data: p } = await supabase.from('profiles').select('*').eq('id', data.user.id).single()
+      // Only the fields the nav needs (never the phone column, which is
+      // protected at the database level).
+      const { data: p } = await supabase.from('profiles').select('id, full_name, role').eq('id', data.user.id).single()
       setProfile(p)
     })
   }, [])
