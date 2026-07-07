@@ -80,6 +80,7 @@ export default function TrackingPage() {
   // nested embed. The base job row is something the buyer can always read,
   // so the page never shows a false "Job not found" just because the driver
   // or profile lookup hiccuped. Driver + their profile are best-effort on top.
+  // Privacy: we only ever read the driver's NAME — never their phone number.
   const fetchJob = async () => {
     const { data: jobRow, error } = await supabase.from('jobs').select('*').eq('id', jobId).maybeSingle()
     if (error) {
@@ -94,9 +95,9 @@ export default function TrackingPage() {
     }
     let driver = null
     if (jobRow.driver_id) {
-      const { data: d } = await supabase.from('drivers').select('*').eq('id', jobRow.driver_id).maybeSingle()
+      const { data: d } = await supabase.from('drivers').select('id, user_id, vehicle_plate, rating, current_lat, current_lng, location_updated_at').eq('id', jobRow.driver_id).maybeSingle()
       if (d) {
-        const { data: prof } = await supabase.from('profiles').select('*').eq('id', d.user_id).maybeSingle()
+        const { data: prof } = await supabase.from('profiles').select('id, full_name').eq('id', d.user_id).maybeSingle()
         driver = { ...d, profile: prof ?? null }
       }
     }
@@ -149,9 +150,10 @@ export default function TrackingPage() {
     if (!confirm(warning)) return
     setCancelling(true)
     try {
+      const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch('/api/jobs/cancel', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
         body: JSON.stringify({ jobId }),
       })
       if (res.ok) {
@@ -184,6 +186,8 @@ export default function TrackingPage() {
   const showDriverLocation = LIVE_TRACKING_STATUSES.includes(job.status) && job.driver?.current_lat != null && job.driver?.current_lng != null
   const canCancel = FEATURE_FLAGS.CANCELLATION_ENABLED && CANCELLABLE_STATUSES.includes(job.status)
   const alreadyRated = job.rating != null
+  const hasProofPhotos = !!(job.pickup_photo_url || job.dropoff_photo_url)
+  const priceAdjusted = job.original_driver_fee != null && Number(job.original_driver_fee) !== Number(job.driver_fee)
 
   return (
     <div>
@@ -213,6 +217,13 @@ export default function TrackingPage() {
         )}
         {job.status === 'delivered' && alreadyRated && (
           <div className="text-center text-sm text-slate-500 mb-6">Thanks for rating your delivery 🙏</div>
+        )}
+
+        {priceAdjusted && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 mb-4">
+            ⚖️ <strong>Price adjusted at pickup:</strong> the driver re-rated the item after seeing it in person.
+            Cash fee updated from <span className="line-through">${job.original_driver_fee}</span> to <strong>${job.driver_fee}</strong>. Details in the timeline below.
+          </div>
         )}
 
         <div className="card mb-4">
@@ -256,11 +267,33 @@ export default function TrackingPage() {
               </div>
               <div className="bg-slate-100 text-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold">🚐 {job.driver.vehicle_plate}</div>
             </div>
-            <div className="flex gap-2 mt-4">
-              <a href={`tel:${job.driver.profile?.phone}`} className="flex-1 bg-green-100 text-green-700 font-semibold py-2.5 rounded-xl text-sm text-center hover:bg-green-200 transition-colors">📞 Call driver</a>
-              <button onClick={() => setShowMessages(true)} className="flex-1 bg-blue-100 text-blue-700 font-semibold py-2.5 rounded-xl text-sm hover:bg-blue-200 transition-colors">💬 Message</button>
+            <button onClick={() => setShowMessages(true)} className="w-full mt-4 bg-blue-100 text-blue-700 font-semibold py-2.5 rounded-xl text-sm hover:bg-blue-200 transition-colors">💬 Message your driver</button>
+            <p className="text-xs text-slate-400 mt-2 text-center">Phone numbers stay private on VanGo — all contact happens in the chat.</p>
+          </div>
+        )}
+
+        {/* Proof photos taken by the driver at pickup / delivery */}
+        {hasProofPhotos && (
+          <div className="card mb-4">
+            <h2 className="font-bold text-sm text-slate-500 mb-3">Proof photos</h2>
+            <div className="grid grid-cols-2 gap-3">
+              {job.pickup_photo_url && (
+                <div>
+                  <div className="text-xs font-semibold text-slate-500 mb-1.5">📦 Loaded at pickup</div>
+                  <a href={job.pickup_photo_url} target="_blank" rel="noopener">
+                    <img src={job.pickup_photo_url} alt="Item loaded at pickup" className="w-full h-32 object-cover rounded-xl border border-slate-200" loading="lazy" />
+                  </a>
+                </div>
+              )}
+              {job.dropoff_photo_url && (
+                <div>
+                  <div className="text-xs font-semibold text-slate-500 mb-1.5">✅ Delivered</div>
+                  <a href={job.dropoff_photo_url} target="_blank" rel="noopener">
+                    <img src={job.dropoff_photo_url} alt="Item delivered" className="w-full h-32 object-cover rounded-xl border border-slate-200" loading="lazy" />
+                  </a>
+                </div>
+              )}
             </div>
-            <p className="text-xs text-slate-400 mt-2 text-center">The driver's number stays private — tap Call to connect.</p>
           </div>
         )}
 
