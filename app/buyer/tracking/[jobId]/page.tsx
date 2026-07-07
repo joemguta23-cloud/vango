@@ -252,7 +252,7 @@ export default function TrackingPage() {
               </div>
               <div className="flex-1">
                 <div className="font-bold">{job.driver.profile?.full_name ?? 'Your driver'}</div>
-                <div className="text-sm text-slate-500">⭐ {job.driver.rating} · {job.driver.total_jobs} deliveries</div>
+                <div className="text-sm text-slate-500">⭐ {job.driver.rating}</div>
               </div>
               <div className="bg-slate-100 text-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold">🚐 {job.driver.vehicle_plate}</div>
             </div>
