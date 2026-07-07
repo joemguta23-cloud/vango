@@ -13,17 +13,23 @@
  * A per-driver fuel surcharge for the driver->pickup leg is added when matched.
  * service_fee (card, platform revenue) = $11.99 flat.
  *
- * Sizing nuance (customer-friendly): a "large" item that is lightweight and
- * easy to load (mattress, ladder, TV, table) is priced at the MEDIUM tier,
- * because loading time is low. Genuinely heavy / high-load large items
- * (fridge, washing machine, wardrobe, gym gear) stay at the LARGE tier.
- * Small / very-small items (packs, misc smaller than medium) are NOT charged
- * a driver fee at all -- only the flat service fee applies.
+ * SIZING IS NOW CATALOGUE-DRIVEN (anti-gaming). Every known item type has a
+ * FIXED price size in ITEM_CATALOG below, chosen by how long it takes to
+ * load, how many hands it needs, and whether it needs a trolley:
+ *   - A fridge is ALWAYS Large: trolley, two people, kept upright.
+ *   - A ladder/mattress/TV is big but light and quick to slide on: Medium.
+ *   - Piano / pool table / spa are specialist two-plus-person jobs: X-Large.
+ * Customers no longer pick a size for known items -- the catalogue assigns it,
+ * so "fridge marked as small" is impossible. Only "Other" lets the customer
+ * choose, and the driver can re-rate any item at pickup when they see it.
+ * Small / very-small items (boxes, bags, small appliances) are NOT charged a
+ * driver fee at all -- only the flat service fee applies.
  */
 import type { ItemSize } from '@/types'
 
 // Full-price base driver fee by (effective) size. Small = free.
-const BASE: Record<ItemSize, number> = { small: 0, medium: 55, large: 85, xlarge: 130 }
+export const BASE_FEES: Record<ItemSize, number> = { small: 0, medium: 55, large: 85, xlarge: 130 }
+const BASE = BASE_FEES
 
 // Flat distance charge, applied per km of the pickup -> dropoff leg.
 export const DISTANCE_RATE_PER_KM = 0.30
@@ -33,17 +39,131 @@ export const DISTANCE_RATE_PER_KM = 0.30
 // Small additional items are free; medium-and-above additional items are flat.
 export const EXTRA_ITEM_FEE = 10
 
-// Item types that are genuinely heavy / high loading-time: they keep their
-// selected size tier. Everything else selected as "large" is treated as
-// "medium" for pricing (big surface area but light + quick to load).
-// This list is intentionally tunable -- see PRICING_ANALYTICS_POLICY.md.
+// ---------------------------------------------------------------------------
+// ITEM CATALOGUE -- the anti-gaming pricing table.
+//
+// `size` is the FIXED price tier for that item type (a floor the customer
+// cannot go below; the driver can still re-rate UP at pickup). `size: null`
+// means the customer chooses ("Other").
+//
+// `effort` drives the helper prompts and driver expectations:
+//   easy       -- one person, quick slide-on (ladder, mattress, TV)
+//   two_person -- heavy / awkward, needs 2 sets of hands and often a trolley
+//   specialist -- serious multi-person specialist load (piano, spa)
+//
+// Item names kept identical to the legacy list where possible so old jobs,
+// icons and analytics stay consistent. Compiled from the most common
+// Facebook Marketplace / Gumtree second-hand categories (appliances,
+// couches & sectionals, dining sets, beds & frames, mattresses, TVs,
+// shelving, dressers, gym gear, outdoor).
+// ---------------------------------------------------------------------------
+export type LoadEffort = 'easy' | 'two_person' | 'specialist'
+
+export interface CatalogEntry {
+  name: string          // stored in jobs.item_type
+  label: string         // shown on the picker tile
+  icon: string
+  size: ItemSize | null // fixed price tier; null = customer selects (Other)
+  effort: LoadEffort
+  loadNote: string      // why it's priced this way (shown to customer + driver)
+}
+
+export const ITEM_CATALOG: CatalogEntry[] = [
+  // -- Large ($85 base): heavy / high loading time, 2 people, often a trolley --
+  { name: 'Fridge', label: 'Fridge', icon: '🧊', size: 'large', effort: 'two_person',
+    loadNote: 'Heavy — needs a trolley, two people and careful upright handling.' },
+  { name: 'Washer/Dryer', label: 'Washer / Dryer', icon: '🌀', size: 'large', effort: 'two_person',
+    loadNote: 'Heavy — needs a trolley and two people to load safely.' },
+  { name: 'Couch', label: 'Couch / Sofa', icon: '🛋️', size: 'large', effort: 'two_person',
+    loadNote: 'Bulky and heavy — two people to carry and load.' },
+  { name: 'Wardrobe', label: 'Wardrobe', icon: '🚪', size: 'large', effort: 'two_person',
+    loadNote: 'Tall and heavy — two people, handled with care.' },
+  { name: 'Drawers/Dresser', label: 'Drawers / Dresser', icon: '🗄️', size: 'large', effort: 'two_person',
+    loadNote: 'Solid and heavy — two people to lift and load.' },
+  { name: 'Dining Table', label: 'Dining Table', icon: '🍽️', size: 'large', effort: 'two_person',
+    loadNote: 'Big and awkward — two people to carry and load.' },
+  { name: 'Gym Equipment', label: 'Gym / Treadmill', icon: '🏋️', size: 'large', effort: 'two_person',
+    loadNote: 'Dense and awkward — two people and slow careful loading.' },
+  { name: 'Materials', label: 'Building Materials', icon: '🧱', size: 'large', effort: 'two_person',
+    loadNote: 'Heavy loads — takes real time and muscle to load.' },
+  { name: 'Outdoor Setting', label: 'Outdoor Setting', icon: '⛱️', size: 'large', effort: 'two_person',
+    loadNote: 'Multiple heavy pieces — two people to load.' },
+
+  // -- X-Large ($130 base): specialist multi-person jobs --
+  { name: 'Piano', label: 'Piano', icon: '🎹', size: 'xlarge', effort: 'specialist',
+    loadNote: 'Specialist move — very heavy, multiple people, careful handling.' },
+  { name: 'Pool Table', label: 'Pool Table', icon: '🎱', size: 'xlarge', effort: 'specialist',
+    loadNote: 'Specialist move — extremely heavy, multiple people.' },
+  { name: 'Spa', label: 'Spa / Hot Tub', icon: '🛁', size: 'xlarge', effort: 'specialist',
+    loadNote: 'Specialist move — very large and heavy, multiple people.' },
+
+  // -- Medium ($55 base): big but light / quick one-person load --
+  { name: 'Mattress', label: 'Mattress', icon: '🛏️', size: 'medium', effort: 'easy',
+    loadNote: 'Big but light — slides straight on.' },
+  { name: 'Bed Frame', label: 'Bed Frame', icon: '🛌', size: 'medium', effort: 'easy',
+    loadNote: 'Light when disassembled — quick to load.' },
+  { name: 'TV', label: 'TV', icon: '📺', size: 'medium', effort: 'easy',
+    loadNote: 'Light — carried by one person with care.' },
+  { name: 'Desk', label: 'Desk / Small Table', icon: '🖥️', size: 'medium', effort: 'easy',
+    loadNote: 'Light — quick one-person load.' },
+  { name: 'Bookshelf', label: 'Bookshelf', icon: '📚', size: 'medium', effort: 'easy',
+    loadNote: 'Light when empty — quick to load.' },
+  { name: 'Chairs', label: 'Chairs', icon: '🪑', size: 'medium', effort: 'easy',
+    loadNote: 'Light — quick to stack and load.' },
+  { name: 'BBQ', label: 'BBQ', icon: '🍖', size: 'medium', effort: 'easy',
+    loadNote: 'Rolls on its wheels — quick to load.' },
+  { name: 'Ladder', label: 'Ladder', icon: '🪜', size: 'medium', effort: 'easy',
+    loadNote: 'Long but light — slides straight on.' },
+  { name: 'Bike', label: 'Bike', icon: '🚲', size: 'medium', effort: 'easy',
+    loadNote: 'Light — lifts straight on.' },
+  { name: 'Rug/Mirror', label: 'Rug / Mirror', icon: '🖼️', size: 'medium', effort: 'easy',
+    loadNote: 'Light — handled with care, quick to load.' },
+  { name: 'Tools', label: 'Tools', icon: '🧰', size: 'medium', effort: 'easy',
+    loadNote: 'Compact — quick to load.' },
+  { name: 'Garden', label: 'Garden / Plants', icon: '🌿', size: 'medium', effort: 'easy',
+    loadNote: 'Light — quick to load.' },
+  { name: 'Trampoline', label: 'Trampoline', icon: '🤸', size: 'medium', effort: 'easy',
+    loadNote: 'Light when disassembled — quick to load.' },
+
+  // -- Small (free driver fee): only the service fee applies --
+  { name: 'Boxes & Bags', label: 'Boxes & Bags', icon: '📦', size: 'small', effort: 'easy',
+    loadNote: 'Small items ride free — you only pay the service fee.' },
+  { name: 'Small Appliance', label: 'Small Appliance', icon: '🔌', size: 'small', effort: 'easy',
+    loadNote: 'Microwave, toaster etc — rides free, only the service fee applies.' },
+
+  // -- Other: customer selects a size; description is mandatory; driver re-rates --
+  { name: 'Other', label: 'Other', icon: '❓', size: null, effort: 'easy',
+    loadNote: 'Describe it clearly — the driver confirms the size at pickup.' },
+]
+
+// Legacy type names from before the catalogue rework, mapped to a price
+// floor so old rows / stale clients still price sensibly.
+const LEGACY_SIZE: Record<string, ItemSize> = { 'TV/Desk': 'medium' }
+
+export function catalogEntry(itemType: string): CatalogEntry | undefined {
+  return ITEM_CATALOG.find(e => e.name === itemType)
+}
+
+// Item types that are genuinely heavy / high loading-time (kept for backwards
+// compatibility with pre-catalogue jobs and older clients).
 export const HEAVY_LOAD_TYPES = ['Fridge', 'Washer/Dryer', 'Couch', 'Wardrobe', 'Gym Equipment', 'Materials', 'Piano']
 
 const SIZE_ORDER: ItemSize[] = ['small', 'medium', 'large', 'xlarge']
 
-// The size we actually PRICE an item at, given its type + the selected size.
+/**
+ * The size we actually PRICE an item at. The catalogue size is a FLOOR:
+ * a fridge can never be priced below Large no matter what the client sends.
+ * A customer can still go bigger (e.g. an unusually huge item of a known
+ * type), and the driver can re-rate upward at pickup.
+ */
 export function effectiveSize(itemType: string, size: ItemSize): ItemSize {
-  if (size === 'large' && !HEAVY_LOAD_TYPES.includes(itemType)) return 'medium'
+  const entry = catalogEntry(itemType)
+  const floor = entry?.size ?? LEGACY_SIZE[itemType] ?? null
+  if (floor && SIZE_ORDER.indexOf(size) < SIZE_ORDER.indexOf(floor)) return floor
+  // No floor (e.g. "Other"), or the chosen/re-rated size is at/above the
+  // floor: honour it as-is. (The old "large-but-light -> medium" downgrade is
+  // gone -- the catalogue now assigns light-but-large items to Medium
+  // directly, so a customer-chosen Large on "Other" genuinely means heavy.)
   return size
 }
 
