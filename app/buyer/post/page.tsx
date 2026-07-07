@@ -33,6 +33,13 @@ const OTHER_SIZES: { key: ItemSize; name: string; desc: string }[] = [
 
 const SIZE_LABEL: Record<ItemSize, string> = { small: 'Small', medium: 'Medium', large: 'Large', xlarge: 'X-Large' }
 
+// Clean money display: never show floating-point junk like 21.990000000000002.
+// Whole dollars show without cents; otherwise exactly 2 decimals.
+const money = (n: number | string) => {
+  const v = Math.round(Number(n) * 100) / 100
+  return Number.isInteger(v) ? v.toFixed(0) : v.toFixed(2)
+}
+
 // -- Blank item template ----------------------------------------------------
 const blankItem = (): JobItem & { _photoFile?: File; _photoPreview?: string } => ({
   item_type: '', item_size: 'medium', description: '', photo_url: null,
@@ -165,12 +172,14 @@ export default function PostJobPage() {
     : price.serviceFee
   const displayTotal = price.driverFee + discountedServiceFee
 
-  // Validation -- BOTH an item type AND a description are required for
-  // every item (a clear description is what the driver relies on).
-  const firstInvalidIdx = items.findIndex(it => !it.item_type || !it.description.trim())
+  // Validation -- an item type, a description AND a photo are required for
+  // every item. The photo is what the driver relies on to judge the load
+  // before accepting, so it is mandatory (take one or upload one).
+  const firstInvalidIdx = items.findIndex(it => !it.item_type || !it.description.trim() || !(it._photoFile || it.photo_url))
   const allItemsValid = firstInvalidIdx === -1
   const typeMissing = triedContinue && !currentItem.item_type
   const descMissing = triedContinue && !currentItem.description.trim()
+  const photoMissing = triedContinue && !(currentItem._photoFile || currentItem.photo_url)
   const locationValid = pickup && dropoff
     && (!hasSecondPickup || !!secondPickup)
     && (!hasSecondDropoff || !!secondDropoff)
@@ -199,24 +208,30 @@ export default function PostJobPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setLoading(false); router.push('/login'); return }
 
-    // Upload photos
-    const hydratedItems: JobItem[] = await Promise.all(items.map(async (it) => {
-      let photo_url = null
+    // Upload photos. Photos are MANDATORY, so an upload failure stops the
+    // post with a clear error instead of silently posting a photo-less job
+    // (which left drivers unable to see what they were picking up).
+    const hydratedItems: JobItem[] = []
+    for (const it of items) {
+      let photo_url = it.photo_url ?? null
       if (it._photoFile) {
         const ext = it._photoFile.name.split('.').pop()
         const path = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-        const { data: up } = await supabase.storage.from('job-photos').upload(path, it._photoFile)
-        if (up) {
-          const { data: { publicUrl } } = supabase.storage.from('job-photos').getPublicUrl(path)
-          photo_url = publicUrl
+        const { data: up, error: upErr } = await supabase.storage.from('job-photos').upload(path, it._photoFile)
+        if (upErr || !up) {
+          setError(`Photo upload failed${upErr?.message ? ` (${upErr.message})` : ''}. Please try again — the photo is required so your driver can see the item.`)
+          setLoading(false)
+          return
         }
+        const { data: { publicUrl } } = supabase.storage.from('job-photos').getPublicUrl(path)
+        photo_url = publicUrl
       }
       // Store the size the pricing engine actually used (catalogue floor),
       // never a client-picked size below it.
       const entry = catalogEntry(it.item_type)
       const finalSize = entry?.size ?? it.item_size
-      return { item_type: it.item_type, item_size: finalSize, description: it.description || `${it.item_type} delivery`, photo_url }
-    }))
+      hydratedItems.push({ item_type: it.item_type, item_size: finalSize, description: it.description || `${it.item_type} delivery`, photo_url })
+    }
 
     const first = hydratedItems[0]
 
@@ -429,13 +444,13 @@ export default function PostJobPage() {
               ⚖️ <strong>Sizes are set by the item, not by you.</strong> When the driver arrives and sees the item in person, they can adjust the size and price to match what's actually there — based on what they see at pickup, not your photo. Describing a bigger item as something smaller will simply be corrected on the spot.
             </div>
 
-            {/* Photo */}
+            {/* Photo -- REQUIRED (drivers judge the load from it before accepting) */}
             <div>
-              <label className="label">Photo (optional but recommended)</label>
+              <label className="label">Photo *</label>
               {!currentItem._photoPreview ? (
-                <label className="border-2 border-dashed border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl p-8 flex flex-col items-center cursor-pointer transition-all bg-slate-50">
+                <label className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center cursor-pointer transition-all bg-slate-50 ${photoMissing ? 'border-red-400 ring-2 ring-red-200' : 'border-slate-200 hover:border-orange-400 hover:bg-orange-50'}`}>
                   <span className="text-3xl mb-2">📸</span>
-                  <span className="text-sm text-slate-500"><strong className="text-orange-500">Tap to upload</strong> · helps driver prepare</span>
+                  <span className="text-sm text-slate-500"><strong className="text-orange-500">Take a photo or upload one</strong> · required so the driver can see the item</span>
                   <input type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
                 </label>
               ) : (
@@ -695,25 +710,25 @@ export default function PostJobPage() {
                     <span className="text-orange-700">VanGo service fee</span>
                     {appliedDiscount ? (
                       <span className="font-bold">
-                        <span className="line-through text-orange-300 mr-1.5">${price.serviceFee}</span>
-                        <span className="text-green-600">${discountedServiceFee}</span>
+                        <span className="line-through text-orange-300 mr-1.5">${money(price.serviceFee)}</span>
+                        <span className="text-green-600">${money(discountedServiceFee)}</span>
                       </span>
                     ) : (
-                      <span className="font-bold">${price.serviceFee}</span>
+                      <span className="font-bold">${money(price.serviceFee)}</span>
                     )}
                   </div>
                   <div className="h-px bg-orange-200 my-2" />
                   <div className="flex justify-between font-black text-base">
                     <span>Total</span>
-                    <span className="text-orange-600">${displayTotal}</span>
+                    <span className="text-orange-600">${money(displayTotal)}</span>
                   </div>
                   <div className="flex justify-between text-xs text-orange-600">
                     <span>Driver receives (cash / PayID on delivery)</span>
-                    <span className="font-bold">${price.driverFee}</span>
+                    <span className="font-bold">${money(price.driverFee)}</span>
                   </div>
                 </div>
                 <p className="text-xs text-orange-600 mt-3">
-                  Pay <strong>${price.driverFee} by cash or PayID</strong> to the driver on delivery. The ${discountedServiceFee} service fee is charged to your card when you post.
+                  Pay <strong>${money(price.driverFee)} by cash or PayID</strong> to the driver on delivery. The ${money(discountedServiceFee)} service fee is charged to your card when you post.
                 </p>
               </div>
             )}
@@ -724,7 +739,7 @@ export default function PostJobPage() {
               <button onClick={() => setStep(2)} className="btn-secondary flex-1 justify-center">← Back</button>
               <button onClick={handleSubmit} disabled={!locationValid || loading}
                 className="btn-primary flex-[2] justify-center disabled:opacity-50">
-                {loading ? 'Posting…' : `🚐 Find a Driver → $${displayTotal}`}
+                {loading ? 'Posting…' : `🚐 Find a Driver → ${money(displayTotal)}`}
               </button>
             </div>
           </div>
