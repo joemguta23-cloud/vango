@@ -28,6 +28,12 @@ const LIVE_TRACKING_STATUSES = ['accepted', 'picked_up']
 const SIZE_LABEL: Record<string, string> = { small: 'Small', medium: 'Medium', large: 'Large', xlarge: 'X-Large' }
 const SIZE_ORDER = ['small', 'medium', 'large', 'xlarge']
 
+// Clean money display: never show floating-point junk like 21.990000000000002.
+const money = (n: number | string) => {
+  const v = Math.round(Number(n) * 100) / 100
+  return Number.isInteger(v) ? v.toFixed(0) : v.toFixed(2)
+}
+
 export default function DriverJobPage() {
   const { jobId } = useParams<{ jobId: string }>()
   const router = useRouter()
@@ -105,7 +111,9 @@ export default function DriverJobPage() {
       const path = `proof/${jobId}/${proof.column === 'pickup_photo_url' ? 'pickup' : 'dropoff'}-${Date.now()}.${ext}`
       const { data: up, error: upErr } = await supabase.storage.from('job-photos').upload(path, proofFile)
       if (upErr || !up) {
-        alert('Could not upload the photo — check your connection and try again.')
+        // Surface the real reason (e.g. a missing storage policy) instead of a
+        // generic message -- this gate must never block a delivery silently.
+        alert(`Could not upload the photo${upErr?.message ? `: ${upErr.message}` : ' — check your connection and try again'}.`)
         setUpdating(false)
         return
       }
@@ -141,6 +149,23 @@ export default function DriverJobPage() {
       setJob(j => j ? { ...j, status: next.status as any } : j)
     }
     setUpdating(false)
+  }
+
+  // Call the customer. Numbers stay hidden from the page itself -- the server
+  // route only hands out the other party's number to a job participant while
+  // the job is actually active (accepted / picked_up).
+  const callCustomer = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`/api/jobs/contact?jobId=${jobId}`, {
+        headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
+      })
+      const data = await res.json()
+      if (!res.ok || !data.phone) { alert(data.error || 'Could not get the number — use the chat instead.'); return }
+      window.location.href = `tel:${data.phone}`
+    } catch {
+      alert('Could not get the number — use the chat instead.')
+    }
   }
 
   // Driver re-rate at pickup: the item in person is bigger/heavier than
@@ -301,17 +326,20 @@ export default function DriverJobPage() {
         <div className="card">
           <h2 className="font-bold text-sm text-slate-500 mb-3">Customer</h2>
           <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="font-bold">{job.buyer?.full_name}</div>
-              <div className="text-xs text-slate-400">Phone numbers stay private — all contact happens in the chat</div>
+            <div className="font-bold">{job.buyer?.full_name}</div>
+            <div className="flex gap-2">
+              {(job.status === 'accepted' || job.status === 'picked_up') && (
+                <button onClick={callCustomer} className="bg-green-100 text-green-700 font-semibold px-4 py-2 rounded-xl text-sm hover:bg-green-200 transition-colors">📞 Call</button>
+              )}
+              <button onClick={() => setShowMessages(true)} className="bg-blue-100 text-blue-700 font-semibold px-4 py-2 rounded-xl text-sm hover:bg-blue-200 transition-colors">💬 Message</button>
             </div>
-            <button onClick={() => setShowMessages(true)} className="bg-blue-100 text-blue-700 font-semibold px-4 py-2 rounded-xl text-sm hover:bg-blue-200 transition-colors">💬 Message</button>
           </div>
+          <p className="text-xs text-slate-400 mt-2">Numbers are only shared between you and the customer while the job is active.</p>
         </div>
 
         <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 text-sm">
           <div className="font-bold text-orange-800 mb-1">Payment on delivery</div>
-          <div className="text-orange-700">Collect <strong>${job.driver_fee}</strong> by <strong>cash or PayID</strong> from the customer when you hand over the item.</div>
+          <div className="text-orange-700">Collect <strong>${money(job.driver_fee)}</strong> by <strong>cash or PayID</strong> from the customer when you hand over the item.</div>
         </div>
 
         {/* Driver re-rate: item bigger than described */}
