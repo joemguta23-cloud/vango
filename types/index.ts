@@ -25,7 +25,7 @@ export interface Driver {
   profile?: Profile
 }
 
-export type ItemSize = 'medium' | 'large' | 'xlarge'
+export type ItemSize = 'small' | 'medium' | 'large' | 'xlarge'
 
 export interface JobItem {
   item_type: string
