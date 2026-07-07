@@ -4,29 +4,34 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Nav from '@/components/Nav'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
-import { calculatePrice, SERVICE_FEE, EXTRA_STOP_FEE, DISTANCE_RATE_PER_KM, haversineKm, kmToZone } from '@/lib/pricing'
+import { calculatePrice, SERVICE_FEE, EXTRA_STOP_FEE, EXTRA_ITEM_FEE, DISTANCE_RATE_PER_KM, haversineKm, kmToZone, ITEM_CATALOG, catalogEntry } from '@/lib/pricing'
 import { FEATURE_FLAGS } from '@/lib/featureFlags'
 import AddressAutocomplete from '@/components/AddressAutocomplete'
 import type { ItemSize, JobItem, DistanceZone } from '@/types'
 
 // -- Item catalogue --------------------------------------------------------
-const ITEM_TYPES = [
-  { icon:'🧊', name:'Fridge' }, { icon:'🌀', name:'Washer/Dryer' },
-  { icon:'🛏️', name:'Mattress' }, { icon:'🛋️', name:'Couch' },
-  { icon:'🖥️', name:'TV/Desk' }, { icon:'🚪', name:'Wardrobe' },
-  { icon:'🍽️', name:'Dining Table' }, { icon:'🏋️', name:'Gym Equipment' },
-  { icon:'🧰', name:'Tools' }, { icon:'🌿', name:'Garden' },
-  { icon:'🧱', name:'Materials' }, { icon:'📦', name:'Other' },
+// The catalogue in lib/pricing.ts is the single source of truth: every known
+// item type carries a FIXED price size (by loading time / hands needed /
+// trolley), so the size can't be gamed. Only "Other" lets the customer pick.
+const CATALOG_SECTIONS: { title: string; sub: string; sizes: (ItemSize | null)[] }[] = [
+  { title: 'Heavy & bulky', sub: 'Two people + often a trolley — priced Large', sizes: ['large'] },
+  { title: 'Extra large', sub: 'Specialist multi-person moves — priced X-Large', sizes: ['xlarge'] },
+  { title: 'Light & easy to load', sub: 'Quick one-person loads — priced Medium', sizes: ['medium'] },
+  { title: 'Small items', sub: 'Boxes, bags, small appliances — FREE driver fee', sizes: ['small'] },
+  { title: 'Something else', sub: "Pick a size and describe it — the driver confirms at pickup", sizes: [null] },
 ]
 
-const ITEM_ICON: Record<string, string> = Object.fromEntries(ITEM_TYPES.map(i => [i.name, i.icon]))
+const ITEM_ICON: Record<string, string> = Object.fromEntries(ITEM_CATALOG.map(i => [i.name, i.icon]))
 
-const SIZES: { key: ItemSize; name: string; desc: string }[] = [
-  { key: 'small', name: 'Small', desc: 'boxes, packs, small misc — free' },
-  { key: 'medium', name: 'Medium', desc: 'e.g. TV, desk, chair' },
-  { key: 'large', name: 'Large', desc: 'e.g. fridge, couch, wardrobe' },
-  { key: 'xlarge', name: 'X-Large', desc: 'e.g. piano, spa bath' },
+// Size options shown ONLY for "Other" (no fixed catalogue size).
+const OTHER_SIZES: { key: ItemSize; name: string; desc: string }[] = [
+  { key: 'small', name: 'Small', desc: 'boxes, packs — free' },
+  { key: 'medium', name: 'Medium', desc: 'light, one person' },
+  { key: 'large', name: 'Large', desc: 'heavy, two people' },
+  { key: 'xlarge', name: 'X-Large', desc: 'specialist move' },
 ]
+
+const SIZE_LABEL: Record<ItemSize, string> = { small: 'Small', medium: 'Medium', large: 'Large', xlarge: 'X-Large' }
 
 // -- Blank item template ----------------------------------------------------
 const blankItem = (): JobItem & { _photoFile?: File; _photoPreview?: string } => ({
@@ -45,7 +50,7 @@ export default function PostJobPage() {
   const [editingItem, setEditingItem] = useState(0) // which item is being configured
   const [triedContinue, setTriedContinue] = useState(false) // show validation errors after a failed Continue
 
-  // Helper arrangements (buyer-side)
+  // Helper arrangements (customer-side)
   const [helperAtPickup, setHelperAtPickup] = useState(false)
   const [helperAtDropoff, setHelperAtDropoff] = useState(false)
   const [helperNote, setHelperNote] = useState('')
@@ -61,6 +66,10 @@ export default function PostJobPage() {
   const [dropoffLng, setDropoffLng] = useState<number | null>(null)
   const [schedule, setSchedule] = useState<'asap' | 'scheduled'>('asap')
   const [scheduledFor, setScheduledFor] = useState('')
+
+  // Access notes (parking, stairs, narrow doors) -- saved with the helper
+  // note so the driver sees them before accepting.
+  const [accessNotes, setAccessNotes] = useState('')
 
   // Multi-pickup / multi-dropoff (toggle + flat add-on fee)
   const [hasSecondPickup, setHasSecondPickup] = useState(false)
@@ -83,8 +92,16 @@ export default function PostJobPage() {
 
   // -- Helpers ------------------------------------------------------------
   const currentItem = items[editingItem]
+  const currentEntry = currentItem.item_type ? catalogEntry(currentItem.item_type) : undefined
   const setCurrentItem = (patch: Partial<DraftItem>) =>
     setItems(prev => prev.map((it, i) => i === editingItem ? { ...it, ...patch } : it))
+
+  // Picking an item type LOCKS its size to the catalogue tier (anti-gaming).
+  // Only "Other" (size: null) keeps the customer's own size choice.
+  const pickItemType = (name: string) => {
+    const entry = catalogEntry(name)
+    setCurrentItem({ item_type: name, item_size: entry?.size ?? currentItem.item_size ?? 'medium' })
+  }
 
   const addItem = () => {
     setItems(prev => [...prev, blankItem()])
@@ -135,9 +152,10 @@ export default function PostJobPage() {
     : null
   const distanceZone: DistanceZone = distanceKm != null ? kmToZone(distanceKm) : 'under_15'
 
-  // Pricing preview -- pass the item TYPE so the engine can apply the
-  // "large-but-light -> medium" rule, and the real km for the flat per-km charge.
-  const priceItems = items.map(it => ({ size: it.item_size, label: `${it.item_type || 'Item'} (${it.item_size})`, type: it.item_type }))
+  // Pricing preview -- pass the item TYPE so the engine applies the catalogue
+  // size floor (a fridge can never price below Large), and the real km for
+  // the flat per-km charge.
+  const priceItems = items.map(it => ({ size: it.item_size, label: `${it.item_type || 'Item'} (${SIZE_LABEL[it.item_size] ?? it.item_size})`, type: it.item_type }))
   const price = calculatePrice(priceItems, distanceKm ?? 0, {
     secondPickup: hasSecondPickup,
     secondDropoff: hasSecondDropoff,
@@ -147,7 +165,7 @@ export default function PostJobPage() {
     : price.serviceFee
   const displayTotal = price.driverFee + discountedServiceFee
 
-  // Validation -- BOTH an item type AND a description are now required for
+  // Validation -- BOTH an item type AND a description are required for
   // every item (a clear description is what the driver relies on).
   const firstInvalidIdx = items.findIndex(it => !it.item_type || !it.description.trim())
   const allItemsValid = firstInvalidIdx === -1
@@ -156,6 +174,7 @@ export default function PostJobPage() {
   const locationValid = pickup && dropoff
     && (!hasSecondPickup || !!secondPickup)
     && (!hasSecondDropoff || !!secondDropoff)
+    && (schedule !== 'scheduled' || !!scheduledFor)
 
   const handleContinueFromItems = () => {
     if (!allItemsValid) {
@@ -167,12 +186,18 @@ export default function PostJobPage() {
     setStep(2)
   }
 
+  // Any heavy / specialist item on the job? Drives the helper nudge in step 2.
+  const hasHeavyItem = items.some(it => {
+    const e = it.item_type ? catalogEntry(it.item_type) : undefined
+    return e ? e.effort !== 'easy' : (it.item_size === 'large' || it.item_size === 'xlarge')
+  })
+
   // -- Submit ------------------------------------------------------------
   const handleSubmit = async () => {
     setLoading(true)
     setError('')
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { router.push('/login'); return }
+    if (!user) { setLoading(false); router.push('/login'); return }
 
     // Upload photos
     const hydratedItems: JobItem[] = await Promise.all(items.map(async (it) => {
@@ -186,10 +211,18 @@ export default function PostJobPage() {
           photo_url = publicUrl
         }
       }
-      return { item_type: it.item_type, item_size: it.item_size, description: it.description || `${it.item_type} delivery`, photo_url }
+      // Store the size the pricing engine actually used (catalogue floor),
+      // never a client-picked size below it.
+      const entry = catalogEntry(it.item_type)
+      const finalSize = entry?.size ?? it.item_size
+      return { item_type: it.item_type, item_size: finalSize, description: it.description || `${it.item_type} delivery`, photo_url }
     }))
 
     const first = hydratedItems[0]
+
+    // Fold access notes into the helper note so the driver sees them.
+    const combinedNote = [helperNote.trim(), accessNotes.trim() ? `Access: ${accessNotes.trim()}` : '']
+      .filter(Boolean).join(' — ') || null
 
     const { data: job, error: jobErr } = await supabase.from('jobs').insert({
       buyer_id: user.id,
@@ -202,7 +235,7 @@ export default function PostJobPage() {
       // Helper info
       helper_at_pickup: helperAtPickup,
       helper_at_dropoff: helperAtDropoff,
-      helper_note: helperNote || null,
+      helper_note: combinedNote,
       // Location -- lat/lng captured automatically via Google Places
       // autocomplete. Falls back to a Melbourne-area default only if the
       // buyer typed an address without selecting an autocomplete suggestion.
@@ -304,46 +337,78 @@ export default function PostJobPage() {
               </div>
             )}
 
-            {/* Item type picker */}
-            <div>
+            {/* Item type picker -- grouped by loading effort; the size/price
+                tier is FIXED per item so heavy items can't be posted cheap. */}
+            <div className={typeMissing ? 'ring-2 ring-red-400 rounded-xl p-1' : ''}>
               <label className="label">What are you moving? *</label>
-              <div className={`grid grid-cols-3 gap-2 ${typeMissing ? 'ring-2 ring-red-400 rounded-xl p-1' : ''}`}>
-                {ITEM_TYPES.map(it => (
-                  <button key={it.name} type="button"
-                    onClick={() => setCurrentItem({ item_type: it.name })}
-                    className={`border-2 rounded-xl py-3 px-2 text-center transition-all ${
-                      currentItem.item_type === it.name
-                        ? 'border-orange-500 bg-orange-50'
-                        : 'border-slate-200 hover:border-orange-300 bg-white'
-                    }`}>
-                    <div className="text-2xl mb-1">{it.icon}</div>
-                    <div className="text-xs font-semibold text-slate-700">{it.name}</div>
-                  </button>
-                ))}
+              <div className="space-y-4">
+                {CATALOG_SECTIONS.map(section => {
+                  const entries = ITEM_CATALOG.filter(e => section.sizes.includes(e.size))
+                  if (entries.length === 0) return null
+                  return (
+                    <div key={section.title}>
+                      <div className="flex items-baseline justify-between mb-1.5">
+                        <span className="text-xs font-bold text-slate-600">{section.title}</span>
+                        <span className="text-[11px] text-slate-400">{section.sub}</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {entries.map(it => (
+                          <button key={it.name} type="button"
+                            onClick={() => pickItemType(it.name)}
+                            className={`border-2 rounded-xl py-2.5 px-1.5 text-center transition-all ${
+                              currentItem.item_type === it.name
+                                ? 'border-orange-500 bg-orange-50'
+                                : 'border-slate-200 hover:border-orange-300 bg-white'
+                            }`}>
+                            <div className="text-xl mb-0.5">{it.icon}</div>
+                            <div className="text-[11px] font-semibold text-slate-700 leading-tight">{it.label}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
               {typeMissing && <p className="text-xs text-red-500 font-semibold mt-1.5">Please pick what you're moving.</p>}
             </div>
 
-            {/* Size */}
-            <div>
-              <label className="label">How big is it? *</label>
-              <div className="grid grid-cols-2 gap-2">
-                {SIZES.map(s => (
-                  <button key={s.key} type="button"
-                    onClick={() => setCurrentItem({ item_size: s.key })}
-                    className={`border-2 rounded-xl py-3 px-2 text-center transition-all ${
-                      currentItem.item_size === s.key
-                        ? 'border-orange-500 bg-orange-50'
-                        : 'border-slate-200 hover:border-orange-300 bg-white'
-                    }`}>
-                    <div className="font-bold text-sm text-slate-800">{s.name}</div>
-                    <div className="text-xs text-slate-500 mt-0.5">{s.desc}</div>
-                  </button>
-                ))}
+            {/* Size -- fixed by the catalogue for known items (anti-gaming);
+                only "Other" lets the customer choose. */}
+            {currentItem.item_type && currentEntry?.size && (
+              <div className={`rounded-xl px-4 py-3 border-2 ${
+                currentEntry.size === 'small' ? 'border-green-200 bg-green-50' : 'border-slate-200 bg-slate-50'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-slate-800">
+                    Sized as {SIZE_LABEL[currentEntry.size]}
+                    {currentEntry.size === 'small' && <span className="text-green-600"> — driver fee free</span>}
+                  </span>
+                  <span className="text-lg">{currentEntry.icon}</span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">{currentEntry.loadNote}</p>
               </div>
-            </div>
+            )}
+            {currentItem.item_type && !currentEntry?.size && (
+              <div>
+                <label className="label">How big is it? *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {OTHER_SIZES.map(s => (
+                    <button key={s.key} type="button"
+                      onClick={() => setCurrentItem({ item_size: s.key })}
+                      className={`border-2 rounded-xl py-3 px-2 text-center transition-all ${
+                        currentItem.item_size === s.key
+                          ? 'border-orange-500 bg-orange-50'
+                          : 'border-slate-200 hover:border-orange-300 bg-white'
+                      }`}>
+                      <div className="font-bold text-sm text-slate-800">{s.name}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{s.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
-            {/* Description -- now REQUIRED */}
+            {/* Description -- REQUIRED */}
             <div>
               <label className="label">Describe the item *</label>
               <textarea
@@ -361,7 +426,7 @@ export default function PostJobPage() {
 
             {/* Honesty / re-rate disclaimer */}
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5 text-xs text-amber-800">
-              ⚖️ <strong>Pick the size honestly.</strong> When the driver arrives and sees the item in person, they can adjust the size and price to match what's actually there. This is based on what the driver sees at pickup — not your photo. Deliberately choosing a smaller size to pay less will simply be corrected on the spot.
+              ⚖️ <strong>Sizes are set by the item, not by you.</strong> When the driver arrives and sees the item in person, they can adjust the size and price to match what's actually there — based on what they see at pickup, not your photo. Describing a bigger item as something smaller will simply be corrected on the spot.
             </div>
 
             {/* Photo */}
@@ -393,7 +458,7 @@ export default function PostJobPage() {
             {/* Multi-item savings + ute-fit reminder */}
             {items.length > 1 && (
               <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800 space-y-1.5">
-                <div><span className="font-bold">🎉 Extra-item saving:</span> because the driver is already making the trip, each extra item from the <strong>same pickup</strong> is a flat +${EXTRA_ITEM_FEE_DISPLAY} — and small items are free.</div>
+                <div><span className="font-bold">🎉 Extra-item saving:</span> because the driver is already making the trip, each extra item from the <strong>same pickup</strong> is a flat +${EXTRA_ITEM_FEE} — and small items are free.</div>
                 <div className="text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 -mx-1">
                   🚐 <strong>Heads up:</strong> all items need to fit together in the back of a single ute at the same time. Please describe how they'll be packed (e.g. stacked, disassembled) in each item's description so the driver can confirm it'll fit before accepting.
                 </div>
@@ -451,10 +516,10 @@ export default function PostJobPage() {
                 </label>
               </div>
 
-              {/* Warning if no help ticked for a large item */}
-              {items.some(it => it.item_size === 'large' || it.item_size === 'xlarge') && !helperAtPickup && !helperAtDropoff && (
+              {/* Warning if no help ticked for a heavy item */}
+              {hasHeavyItem && !helperAtPickup && !helperAtDropoff && (
                 <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-800">
-                  ⚠️ <strong>Heads up:</strong> You've selected a large/heavy item. Drivers may decline jobs where no help is available at either end. Ticking one or both boxes significantly improves your match speed.
+                  ⚠️ <strong>Heads up:</strong> Your item needs two sets of hands (think fridge, couch, washer). Drivers may decline jobs where no help is available at either end. Ticking one or both boxes significantly improves your match speed.
                 </div>
               )}
 
@@ -568,10 +633,12 @@ export default function PostJobPage() {
               )}
             </div>
 
-            {/* Access notes */}
+            {/* Access notes -- folded into the helper note on submit so the
+                driver actually sees them (previously this field went nowhere). */}
             <div>
               <label className="label">Access notes (optional)</label>
-              <input className="input" placeholder="e.g. Driveway available, ground floor, narrow front door" />
+              <input className="input" placeholder="e.g. Driveway available, ground floor, narrow front door"
+                value={accessNotes} onChange={e => setAccessNotes(e.target.value)} />
             </div>
 
             {/* Promo code (feature-flagged, see lib/featureFlags.ts) */}
@@ -666,6 +733,3 @@ export default function PostJobPage() {
     </div>
   )
 }
-
-// Flat extra-item fee shown in the multi-item banner (keep in sync with lib/pricing.ts EXTRA_ITEM_FEE).
-const EXTRA_ITEM_FEE_DISPLAY = 10
