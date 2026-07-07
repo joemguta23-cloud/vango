@@ -72,12 +72,36 @@ export default function TrackingPage() {
   const [job, setJob] = useState(null)
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [showMessages, setShowMessages] = useState(false)
 
+  // Fetch the job as separate, resilient queries instead of one fragile
+  // nested embed. The base job row is something the buyer can always read,
+  // so the page never shows a false "Job not found" just because the driver
+  // or profile lookup hiccuped. Driver + their profile are best-effort on top.
   const fetchJob = async () => {
-    const { data } = await supabase.from('jobs').select('*, driver:drivers(*, profile:profiles(*))').eq('id', jobId).single()
-    setJob(data)
+    const { data: jobRow, error } = await supabase.from('jobs').select('*').eq('id', jobId).maybeSingle()
+    if (error) {
+      console.error('[tracking] job fetch error', error)
+      setLoading(false)
+      return // keep whatever we had; do NOT flip to "not found" on a transient error
+    }
+    if (!jobRow) {
+      setNotFound(true)
+      setLoading(false)
+      return
+    }
+    let driver = null
+    if (jobRow.driver_id) {
+      const { data: d } = await supabase.from('drivers').select('*').eq('id', jobRow.driver_id).maybeSingle()
+      if (d) {
+        const { data: prof } = await supabase.from('profiles').select('*').eq('id', d.user_id).maybeSingle()
+        driver = { ...d, profile: prof ?? null }
+      }
+    }
+    setNotFound(false)
+    setJob({ ...jobRow, driver })
     setLoading(false)
   }
   const fetchEvents = async () => {
@@ -85,18 +109,31 @@ export default function TrackingPage() {
     setEvents(data ?? [])
   }
 
+  // Realtime: the job row + its status events. This auto-updates the screen
+  // the instant the driver accepts / picks up / delivers — no manual refresh.
   useEffect(() => {
     fetchJob(); fetchEvents()
     const channel = supabase.channel(`job-${jobId}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'jobs', filter: `id=eq.${jobId}` }, fetchJob)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs', filter: `id=eq.${jobId}` }, fetchJob)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_status_events', filter: `job_id=eq.${jobId}` }, fetchEvents)
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [jobId])
 
-  // Poll for the driver's live location while the job is actively out for
-  // delivery. This is on top of the realtime channel above (which only
-  // fires on `jobs`/`job_status_events` changes, not `drivers` changes).
+  // Realtime: the assigned driver's live GPS. Once a driver is assigned and
+  // the job is out for delivery, push their moving pin to the map instantly
+  // (like Uber) rather than waiting for the slow poll below.
+  useEffect(() => {
+    const driverId = job?.driver_id
+    if (!driverId || !LIVE_TRACKING_STATUSES.includes(job?.status)) return
+    const channel = supabase.channel(`driver-loc-${driverId}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'drivers', filter: `id=eq.${driverId}` }, fetchJob)
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [job?.driver_id, job?.status])
+
+  // Poll fallback for driver location while out for delivery, in case a
+  // websocket drops silently.
   useEffect(() => {
     if (!job || !LIVE_TRACKING_STATUSES.includes(job.status)) return
     const interval = setInterval(fetchJob, 10000)
@@ -130,7 +167,17 @@ export default function TrackingPage() {
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="text-5xl mb-4 animate-bounce">🚐</div></div>
-  if (!job) return <div className="min-h-screen flex items-center justify-center"><p>Job not found.</p></div>
+  if (notFound || !job) return (
+    <div>
+      <Nav />
+      <div className="max-w-lg mx-auto px-4 pt-24 pb-12 text-center">
+        <div className="text-5xl mb-3">🤔</div>
+        <p className="font-bold text-slate-700 mb-1">We couldn't find that job</p>
+        <p className="text-sm text-slate-500 mb-5">It may have been removed, or you're signed in as a different account.</p>
+        <a href="/buyer/dashboard" className="btn-primary inline-block py-2.5 px-5">Go to my jobs</a>
+      </div>
+    </div>
+  )
 
   const statusInfo = STATUS_LABELS[job.status] ?? STATUS_LABELS.pending
   const statusIndex = STATUS_ORDER.indexOf(job.status)
@@ -142,6 +189,11 @@ export default function TrackingPage() {
     <div>
       <Nav />
       <div className="max-w-lg mx-auto px-4 pt-24 pb-12">
+        <div className="flex items-center justify-between mb-4">
+          <a href="/buyer/dashboard" className="text-sm font-semibold text-slate-500 hover:text-slate-700">← My jobs</a>
+          <a href="/buyer/post" className="text-sm font-semibold text-orange-500 hover:text-orange-600">+ Post another</a>
+        </div>
+
         <div className={`rounded-2xl p-6 text-center mb-6 ${job.status === 'delivered' ? 'bg-green-50 border border-green-200' : job.status === 'cancelled' ? 'bg-red-50 border border-red-200' : 'bg-orange-50 border border-orange-200'}`}>
           <div className="text-5xl mb-3">{statusInfo.icon}</div>
           <h1 className="text-xl font-black text-slate-800 mb-1">{statusInfo.label}</h1>
@@ -199,7 +251,7 @@ export default function TrackingPage() {
                 {job.driver.profile?.full_name?.charAt(0) ?? 'D'}
               </div>
               <div className="flex-1">
-                <div className="font-bold">{job.driver.profile?.full_name}</div>
+                <div className="font-bold">{job.driver.profile?.full_name ?? 'Your driver'}</div>
                 <div className="text-sm text-slate-500">⭐ {job.driver.rating} · {job.driver.total_jobs} deliveries</div>
               </div>
               <div className="bg-slate-100 text-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold">🚐 {job.driver.vehicle_plate}</div>
