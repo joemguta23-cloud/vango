@@ -10,11 +10,11 @@ import type { Job } from '@/types'
 
 const NEXT_STATUS: Record<string, { status: string; label: string; note: string }> = {
   accepted: { status: 'picked_up', label: 'Mark as Picked Up', note: 'Item collected from seller' },
-  picked_up: { status: 'delivered', label: 'Mark as Delivered', note: 'Item delivered to buyer' },
+  picked_up: { status: 'delivered', label: 'Mark as Delivered', note: 'Item delivered to customer' },
 }
 
 // Statuses during which this driver's live location should be broadcast to
-// the buyer. Location sharing stops the moment the job leaves this set
+// the customer. Location sharing stops the moment the job leaves this set
 // (delivered, or the effect cleans up on unmount) -- for privacy.
 const LIVE_TRACKING_STATUSES = ['accepted', 'picked_up']
 
@@ -34,7 +34,7 @@ export default function DriverJobPage() {
   }, [jobId])
 
   // Share this driver's live GPS position while the job is actively out for
-  // delivery, so the buyer can see the driver approaching on the map (like
+  // delivery, so the customer can see the driver approaching on the map (like
   // Uber Eats). Stops automatically once the job is delivered or this page
   // is left, and never runs for any other job status.
   useEffect(() => {
@@ -140,6 +140,7 @@ export default function DriverJobPage() {
   const showLocationBanner = LIVE_TRACKING_STATUSES.includes(job.status)
   const hasExtraStops = !!(job.second_pickup_address || job.second_dropoff_address)
   const canCancel = job.status === 'accepted' || job.status === 'picked_up'
+  const itemPhotos = (Array.isArray((job as any).items) ? (job as any).items.map((it: any) => it?.photo_url) : [job.photo_url]).filter(Boolean)
 
   return (
     <div>
@@ -156,8 +157,8 @@ export default function DriverJobPage() {
             : locationSharing === 'denied' ? 'bg-amber-50 border border-amber-200 text-amber-700'
             : 'bg-slate-50 border border-slate-200 text-slate-500'
           }`}>
-            {locationSharing === 'active' && (<><span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Sharing your live location with the buyer</>)}
-            {locationSharing === 'denied' && (<>⚠️ Location permission denied -- turn on location services so the buyer can see you're on the way</>)}
+            {locationSharing === 'active' && (<><span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Sharing your live location with the customer</>)}
+            {locationSharing === 'denied' && (<>⚠️ Location permission denied -- turn on location services so the customer can see you're on the way</>)}
             {locationSharing === 'unsupported' && (<>Live location isn't supported on this device</>)}
             {locationSharing === 'idle' && (<>📍 Starting live location sharing...</>)}
           </div>
@@ -206,28 +207,32 @@ export default function DriverJobPage() {
           <h2 className="font-bold text-sm text-slate-500 mb-3">Item</h2>
           <div className="text-base font-bold mb-1">{job.item_type} <span className="text-slate-400 font-normal text-sm">({job.item_size})</span></div>
           <p className="text-sm text-slate-600">{job.item_description}</p>
-          {job.photo_url && (
-            <img src={job.photo_url} alt="Item" className="mt-3 rounded-xl w-full h-40 object-cover" />
+          {itemPhotos.length > 0 && (
+            <div className="flex gap-2 mt-3 overflow-x-auto">
+              {itemPhotos.map((url: string, idx: number) => (
+                <img key={idx} src={url} alt="Item" className="h-40 w-52 object-cover rounded-xl flex-shrink-0 border border-slate-200" loading="lazy" />
+              ))}
+            </div>
           )}
         </div>
 
         <div className="card">
-          <h2 className="font-bold text-sm text-slate-500 mb-3">Buyer</h2>
+          <h2 className="font-bold text-sm text-slate-500 mb-3">Customer</h2>
           <div className="flex items-center justify-between gap-2">
             <div>
               <div className="font-bold">{job.buyer?.full_name}</div>
-              <div className="text-sm text-slate-500">{job.buyer?.phone}</div>
+              <div className="text-xs text-slate-400">Number kept private — use the buttons to reach them</div>
             </div>
             <div className="flex gap-2">
               <button onClick={() => setShowMessages(true)} className="bg-blue-100 text-blue-700 font-semibold px-4 py-2 rounded-xl text-sm hover:bg-blue-200 transition-colors">Message</button>
-              <a href={`tel:${job.buyer?.phone}`} className="bg-green-100 text-green-700 font-semibold px-4 py-2 rounded-xl text-sm hover:bg-green-200 transition-colors">Call</a>
+              <a href={`tel:${job.buyer?.phone}`} className="bg-green-100 text-green-700 font-semibold px-4 py-2 rounded-xl text-sm hover:bg-green-200 transition-colors">Call Customer</a>
             </div>
           </div>
         </div>
 
         <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 text-sm">
           <div className="font-bold text-orange-800 mb-1">Payment on delivery</div>
-          <div className="text-orange-700">Collect <strong>${job.driver_fee} cash</strong> from the buyer when you hand over the item.</div>
+          <div className="text-orange-700">Collect <strong>${job.driver_fee}</strong> by <strong>cash or PayID</strong> from the customer when you hand over the item.</div>
         </div>
 
         {nextAction && (
