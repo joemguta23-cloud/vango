@@ -1,4 +1,4 @@
-undefined'use client'
+'use client'
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Nav from '@/components/Nav'
@@ -24,6 +24,12 @@ const LIVE_TRACKING_STATUSES = ['accepted', 'picked_up']
 // lib/featureFlags.ts). Free before a driver accepts; a $2 fee applies
 // once a driver has already accepted.
 const CANCELLABLE_STATUSES = ['pending', 'accepted']
+
+// Clean money display: never show floating-point junk like 21.990000000000002.
+const money = (n) => {
+  const v = Math.round(Number(n) * 100) / 100
+  return Number.isInteger(v) ? v.toFixed(0) : v.toFixed(2)
+}
 
 function timeAgo(iso) {
   const secs = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000))
@@ -141,6 +147,23 @@ export default function TrackingPage() {
     return () => clearInterval(interval)
   }, [job?.status, jobId])
 
+  // Call the driver. Numbers stay hidden from the page itself -- the server
+  // route only hands out the other party's number to a job participant while
+  // the job is actually active (accepted / picked_up).
+  const callDriver = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`/api/jobs/contact?jobId=${jobId}`, {
+        headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
+      })
+      const data = await res.json()
+      if (!res.ok || !data.phone) { alert(data.error || 'Could not get the number — use the chat instead.'); return }
+      window.location.href = `tel:${data.phone}`
+    } catch {
+      alert('Could not get the number — use the chat instead.')
+    }
+  }
+
   const handleCancel = async () => {
     if (!job) return
     const afterAccept = job.status !== 'pending'
@@ -222,7 +245,7 @@ export default function TrackingPage() {
         {priceAdjusted && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 mb-4">
             ⚖️ <strong>Price adjusted at pickup:</strong> the driver re-rated the item after seeing it in person.
-            Cash fee updated from <span className="line-through">${job.original_driver_fee}</span> to <strong>${job.driver_fee}</strong>. Details in the timeline below.
+            Cash fee updated from <span className="line-through">${money(job.original_driver_fee)}</span> to <strong>${money(job.driver_fee)}</strong>. Details in the timeline below.
           </div>
         )}
 
@@ -267,8 +290,13 @@ export default function TrackingPage() {
               </div>
               <div className="bg-slate-100 text-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold">🚐 {job.driver.vehicle_plate}</div>
             </div>
-            <button onClick={() => setShowMessages(true)} className="w-full mt-4 bg-blue-100 text-blue-700 font-semibold py-2.5 rounded-xl text-sm hover:bg-blue-200 transition-colors">💬 Message your driver</button>
-            <p className="text-xs text-slate-400 mt-2 text-center">Phone numbers stay private on VanGo — all contact happens in the chat.</p>
+            <div className="flex gap-2 mt-4">
+              {LIVE_TRACKING_STATUSES.includes(job.status) && (
+                <button onClick={callDriver} className="flex-1 bg-green-100 text-green-700 font-semibold py-2.5 rounded-xl text-sm hover:bg-green-200 transition-colors">📞 Call driver</button>
+              )}
+              <button onClick={() => setShowMessages(true)} className="flex-1 bg-blue-100 text-blue-700 font-semibold py-2.5 rounded-xl text-sm hover:bg-blue-200 transition-colors">💬 Message</button>
+            </div>
+            <p className="text-xs text-slate-400 mt-2 text-center">Numbers are only shared between you and your driver while the job is active.</p>
           </div>
         )}
 
@@ -304,8 +332,8 @@ export default function TrackingPage() {
               { label: 'Item', value: `${job.item_type} (${job.item_size})` },
               { label: 'Pickup', value: job.pickup_address },
               { label: 'Dropoff', value: job.dropoff_address },
-              { label: 'Driver fee', value: `$${job.driver_fee} — cash or PayID on delivery` },
-              { label: 'Service fee', value: `$${job.service_fee}` },
+              { label: 'Driver fee', value: `${money(job.driver_fee)} — cash or PayID on delivery` },
+              { label: 'Service fee', value: `${money(job.service_fee)}` },
             ].map(r => (
               <div key={r.label} className="flex justify-between py-1.5 border-b border-slate-100 last:border-0">
                 <span className="text-slate-500">{r.label}</span>
