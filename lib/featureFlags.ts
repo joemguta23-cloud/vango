@@ -9,9 +9,11 @@ export const FEATURE_FLAGS = {
   // recorded and folded into the buyer's next completed job's checkout.
   CANCELLATION_ENABLED: false,
 
-  // Buyers can enter a promo code when posting a job for 10/20/30% off
-  // or a full service-fee waiver (see supabase discount_codes table).
-  DISCOUNT_CODES_ENABLED: false,
+  // Promo codes: customers can enter a code when posting a job for a % off
+  // or a full service-fee waiver (see supabase discount_codes table). Single-
+  // use codes are consumed on the first successful post and also expire after
+  // 10 minutes; a reusable master code waives the fee for friends/family.
+  DISCOUNT_CODES_ENABLED: true,
 }
 
 // Fixed $2 fee applied to a buyer's next completed job if they cancel
