@@ -13,7 +13,7 @@ const CATEGORIES = [
 const STEPS = [
   { n: '1', title: 'Post your item', desc: 'Take a photo, select the item type, and enter pickup and dropoff addresses. Done in under 2 minutes.' },
   { n: '2', title: 'Get matched instantly', desc: 'We find the nearest available ute or van driver and assign them your job. You see their name, vehicle, and ETA immediately.' },
-  { n: '3', title: 'Track & receive', desc: "Get notified at every step. Pay cash to the driver on delivery — we charge a small $12 service fee." },
+  { n: '3', title: 'Track & receive', desc: "Get notified at every step. Pay the driver cash or PayID on delivery — we charge a small $11.99 service fee." },
 ]
 
 export default function HomePage() {
@@ -68,6 +68,27 @@ export default function HomePage() {
           <Link href="/signup?role=driver" className="btn-secondary justify-center text-base py-3 px-8">Become a driver</Link>
         </div>
       </section>
+
+      <footer className="bg-slate-800 text-slate-300 py-12 px-4 mt-8">
+        <div className="max-w-4xl mx-auto text-center text-sm space-y-2">
+          <div className="text-lg font-black text-white">Van<span className="text-orange-400">Go</span></div>
+          <p>Peer-to-peer large-item &amp; furniture delivery across Melbourne &amp; Victoria, Australia.</p>
+          <p>
+            VanGo is a service operated by <strong className="text-white">A.C.N. 681 822 426 Pty Ltd</strong>{' '}
+            (ACN 681&nbsp;822&nbsp;426), a company registered in Australia, trading as &ldquo;Two Minute Van&rdquo;,
+            based in Melbourne, Victoria, Australia.
+          </p>
+          <p>
+            Contact:{' '}
+            <a href="mailto:admin@getvango.com.au" className="text-orange-400 font-semibold hover:underline">admin@getvango.com.au</a>
+          </p>
+          <p className="space-x-4">
+            <Link href="/privacy" className="hover:underline">Privacy Policy</Link>
+            <Link href="/account-deletion" className="hover:underline">Delete Account</Link>
+          </p>
+          <p className="text-slate-500 text-xs pt-2">© 2026 A.C.N. 681 822 426 Pty Ltd. All rights reserved.</p>
+        </div>
+      </footer>
     </div>
   )
 }
