@@ -3,12 +3,12 @@ import { stripe, SERVICE_FEE_CENTS } from '@/lib/stripe'
 import { createSupabaseAdminClient } from '@/lib/supabase'
 import { FEATURE_FLAGS, CANCELLATION_FEE_CENTS } from '@/lib/featureFlags'
 
-// Creates a Stripe Checkout Session for the $12 VanGo service fee.
+// Creates a Stripe Checkout Session for the VanGo service fee.
 // Card, Apple Pay and Google Pay are surfaced automatically based on what
 // is enabled in the Stripe Dashboard payment method settings -- we deliberately
 // do not hardcode payment_method_types so new wallets can be turned on later
-// without a code change. The driver's cash fee is NOT charged here; only the
-// service fee flows through Stripe (driver is paid cash on delivery).
+// without a code change. The driver's cash / PayID fee is NOT charged here; only
+// the service fee flows through Stripe.
 export async function POST(req: NextRequest) {
   try {
     const { jobId } = await req.json()
@@ -31,20 +31,38 @@ export async function POST(req: NextRequest) {
       ? Math.round(Number(job.service_fee) * 100)
       : SERVICE_FEE_CENTS
 
-    // Feature-flagged: apply a promo code stored on this job (see
-    // lib/featureFlags.ts and app/api/discount-codes/validate/route.ts).
+    // Promo code applied to this job (see lib/featureFlags.ts and
+    // app/api/discount-codes/validate/route.ts).
     if (FEATURE_FLAGS.DISCOUNT_CODES_ENABLED && job.discount_code_id) {
       const { data: dc } = await supabase
         .from('discount_codes')
         .select('*')
         .eq('id', job.discount_code_id)
         .single()
-      if (dc && dc.active) {
+
+      // Re-validate at charge time -- the code could have expired or been used
+      // up between the customer applying it and reaching checkout.
+      const stillValid = dc && dc.active
+        && (!dc.expires_at || new Date(dc.expires_at) >= new Date())
+        && (dc.max_uses == null || (dc.uses_count ?? 0) < dc.max_uses)
+
+      if (stillValid) {
         if (dc.waive_service_fee) {
           feeCents = 0
         } else if (dc.percent_off) {
           feeCents = Math.round(feeCents * (1 - dc.percent_off / 100))
         }
+
+        // Consume the code: single-use codes expire the moment they're used.
+        // Increment the usage counter and, once it hits its cap, deactivate the
+        // code so it can never be applied again. A master code with no max_uses
+        // just keeps counting and stays active (reusable for friends/family).
+        const newCount = (dc.uses_count ?? 0) + 1
+        const exhausted = dc.max_uses != null && newCount >= dc.max_uses
+        await supabase
+          .from('discount_codes')
+          .update({ uses_count: newCount, active: exhausted ? false : dc.active })
+          .eq('id', dc.id)
       }
     }
 
@@ -88,7 +106,7 @@ export async function POST(req: NextRequest) {
           currency: 'aud',
           product_data: {
             name: 'VanGo service fee',
-            description: 'Booking & matching fee -- driver fee is paid cash on delivery',
+            description: 'Booking & matching fee -- driver fee is paid cash / PayID on delivery',
           },
           unit_amount: feeCents,
         },
