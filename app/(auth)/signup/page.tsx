@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
 import { REGIONS, DEFAULT_REGION } from '@/lib/regions'
+import SocialAuthButtons from '@/components/SocialAuthButtons'
 
 function SignupForm() {
   const router = useRouter()
@@ -41,6 +42,15 @@ function SignupForm() {
           </button>
         ))}
       </div>
+
+      <SocialAuthButtons role={role} />
+
+      <div className="flex items-center gap-3 my-5">
+        <div className="h-px bg-slate-200 flex-1" />
+        <span className="text-xs text-slate-400">or sign up with email</span>
+        <div className="h-px bg-slate-200 flex-1" />
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <div><label className="label">Full name</label><input className="input" type="text" placeholder="Your full name" value={form.full_name} onChange={set('full_name')} required /></div>
         <div><label className="label">Phone number</label><input className="input" type="tel" placeholder="04XX XXX XXX" value={form.phone} onChange={set('phone')} required /></div>
