@@ -4,7 +4,7 @@ import type { Metadata } from 'next'
 export const metadata: Metadata = {
   title: 'Privacy Policy',
   description:
-    'How VanGo collects, uses and protects your information, including driver location data used to match and track deliveries across Melbourne and Victoria.',
+    'How Vanute collects, uses and protects your information, including driver location data used to match and track deliveries across Melbourne and Victoria.',
   alternates: { canonical: 'https://getvango.com.au/privacy' },
 }
 
@@ -17,9 +17,9 @@ export default function PrivacyPage() {
         <p className="text-slate-500 text-sm mb-8">Last updated: 2 July 2026</p>
 
         <p className="text-slate-600 leading-relaxed mb-4">
-          This Privacy Policy explains how Two Minute Van Pty Ltd, trading as VanGo (“VanGo”, “we”, “us”),
-          collects, uses, discloses and protects your personal information when you use the VanGo website and
-          mobile app (the “Service”). VanGo is a peer-to-peer delivery marketplace operating in Melbourne and
+          This Privacy Policy explains how Two Minute Van Pty Ltd, trading as Vanute (“Vanute”, “we”, “us”),
+          collects, uses, discloses and protects your personal information when you use the Vanute website and
+          mobile app (the “Service”). Vanute is a peer-to-peer delivery marketplace operating in Melbourne and
           Victoria, Australia. By using the Service you agree to this policy.
         </p>
 
@@ -30,7 +30,7 @@ export default function PrivacyPage() {
           <li><strong>Driver information</strong> — for drivers: vehicle details and driver licence details.</li>
           <li><strong>Location information</strong> — for drivers who go “Online”, we collect your device’s precise location, including while the app is running in the background, so we can match you to nearby jobs and show buyers live tracking. Location is only collected while you are Online and stops when you go Offline.</li>
           <li><strong>Job information</strong> — pickup and dropoff addresses, item details and photos, and delivery status.</li>
-          <li><strong>Payment information</strong> — card payments for the VanGo service fee are processed by Stripe. We do not store your full card number; Stripe handles it securely.</li>
+          <li><strong>Payment information</strong> — card payments for the Vanute service fee are processed by Stripe. We do not store your full card number; Stripe handles it securely.</li>
           <li><strong>Usage and device data</strong> — basic technical information needed to operate and secure the Service.</li>
         </ul>
 
@@ -46,7 +46,7 @@ export default function PrivacyPage() {
         <ul className="list-disc pl-6 text-slate-600 leading-relaxed mb-4 space-y-1">
           <li><strong>With other users</strong> — to complete a job, a buyer and their assigned driver see the information needed for the delivery (such as names, relevant addresses and, during an active job, the driver’s live location).</li>
           <li><strong>Service providers</strong> — Stripe (payments), Google Maps (addresses and mapping), and Supabase (secure hosting and database).</li>
-          <li><strong>Legal</strong> — where required by law or to protect the rights, safety and property of users or VanGo.</li>
+          <li><strong>Legal</strong> — where required by law or to protect the rights, safety and property of users or Vanute.</li>
         </ul>
         <p className="text-slate-600 leading-relaxed mb-4">We do not sell your personal information.</p>
 
