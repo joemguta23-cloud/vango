@@ -31,7 +31,7 @@ export default function Nav() {
       <div className="max-w-6xl mx-auto h-full flex items-center justify-between px-4 sm:px-6">
         <Link href="/" className="flex items-center gap-2 font-black text-xl text-slate-800 shrink-0">
           <span className="w-9 h-9 bg-orange-500 rounded-lg flex items-center justify-center text-lg">🚐</span>
-          <span>Van<span className="text-orange-500">Go</span></span>
+          <span>Van<span className="text-orange-500">ute</span></span>
         </Link>
 
         {/* Desktop */}
