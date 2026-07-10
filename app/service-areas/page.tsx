@@ -5,7 +5,7 @@ import type { Metadata } from 'next'
 export const metadata: Metadata = {
   title: 'Delivery Service Areas — Melbourne & Victoria',
   description:
-    'VanGo provides large item and furniture delivery across Melbourne and Victoria — inner city, northern, western, eastern, southern and bayside suburbs. See the areas our ute and van drivers cover.',
+    'Vanute provides large item and furniture delivery across Melbourne and Victoria — inner city, northern, western, eastern, southern and bayside suburbs. See the areas our ute and van drivers cover.',
   alternates: { canonical: 'https://getvango.com.au/service-areas' },
 }
 
@@ -26,7 +26,7 @@ export default function ServiceAreasPage() {
         <div className="text-xs font-bold text-orange-500 tracking-widest uppercase mb-2">Where we deliver</div>
         <h1 className="text-4xl font-black text-slate-800 mb-4">Large item delivery across Melbourne &amp; Victoria</h1>
         <p className="text-slate-600 leading-relaxed max-w-2xl mb-10">
-          VanGo matches you with a nearby ute or van driver for large item and furniture delivery right across
+          Vanute matches you with a nearby ute or van driver for large item and furniture delivery right across
           metropolitan Melbourne and regional Victoria. Whether it is a fridge from a Facebook Marketplace seller
           in Footscray, a couch from Gumtree in Brunswick, or a mattress across town, we cover it.
         </p>
@@ -43,7 +43,7 @@ export default function ServiceAreasPage() {
         <div className="card bg-orange-50 border-orange-200 mb-10">
           <h2 className="font-bold text-lg mb-1 text-orange-800">Currently serving Victoria</h2>
           <p className="text-orange-700 text-sm leading-relaxed">
-            VanGo operates across Victoria today, with Victoria set as the default region for all buyers and drivers.
+            Vanute operates across Victoria today, with Victoria set as the default region for all buyers and drivers.
             We are expanding to New South Wales, Queensland and the other Australian states soon — check back or sign
             up to be ready when we launch in your state.
           </p>
