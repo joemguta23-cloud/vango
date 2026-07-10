@@ -26,7 +26,7 @@ export default function HomePage() {
           Big items, delivered <span className="text-orange-500">fast.</span>
         </h1>
         <p className="text-slate-500 text-lg mb-8">
-          VanGo connects Melbourne buyers and sellers with nearby ute and van drivers for same-day large item delivery.
+          Vanute connects Melbourne buyers and sellers with nearby ute and van drivers for same-day large item delivery.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <Link href="/signup?role=buyer" className="btn-primary justify-center text-base py-3 px-8">📦 I need delivery</Link>
@@ -71,10 +71,10 @@ export default function HomePage() {
 
       <footer className="bg-slate-800 text-slate-300 py-12 px-4 mt-8">
         <div className="max-w-4xl mx-auto text-center text-sm space-y-2">
-          <div className="text-lg font-black text-white">Van<span className="text-orange-400">Go</span></div>
+          <div className="text-lg font-black text-white">Van<span className="text-orange-400">ute</span></div>
           <p>Peer-to-peer large-item &amp; furniture delivery across Melbourne &amp; Victoria, Australia.</p>
           <p>
-            VanGo is a service operated by <strong className="text-white">A.C.N. 681 822 426 Pty Ltd</strong>{' '}
+            Vanute is a service operated by <strong className="text-white">A.C.N. 681 822 426 Pty Ltd</strong>{' '}
             (ACN 681&nbsp;822&nbsp;426), a company registered in Australia, trading as &ldquo;Two Minute Van&rdquo;,
             based in Melbourne, Victoria, Australia.
           </p>
