@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
 /**
- * VanGo native app (Capacitor) configuration.
+ * Vanute native app (Capacitor) configuration.
  *
  * The native iOS/Android shell loads the live site (server.url) so the app
  * always runs the latest deployed code — no app-store update needed for most
@@ -10,7 +10,7 @@ import type { CapacitorConfig } from '@capacitor/cli'
  */
 const config: CapacitorConfig = {
   appId: 'au.com.getvango.app',
-  appName: 'VanGo',
+  appName: 'Vanute',
   webDir: 'public',
   server: {
     url: 'https://getvango.com.au',
