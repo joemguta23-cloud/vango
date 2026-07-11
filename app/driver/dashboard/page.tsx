@@ -12,6 +12,19 @@ const ITEM_ICONS: Record<string, string> = {
   'Tools':'Tools','Garden':'Garden','Materials':'Materials','Other':'Item',
 }
 
+// Coarse column list for PENDING (not-yet-accepted) jobs. Drivers browsing the
+// open-jobs feed get only what the card needs to decide -- deliberately NO exact
+// GPS coordinates (pickup_lat/lng, dropoff_lat/lng), NO buyer_id, and none of the
+// second-stop address/coord fields. Precise coordinates + full identity are only
+// exposed to the ONE driver who accepts (the job-detail page refetches by id, and
+// RLS returns full data to the assigned driver). This keeps an "online driver"
+// from bulk-harvesting every Marketplace pickup's exact location.
+const PENDING_JOB_COLUMNS =
+  'id, status, driver_id, item_type, item_size, items, photo_url, item_description, helper_note, driver_fee, scheduled_for, created_at, pickup_address, dropoff_address'
+
+// Cap how many open jobs a single client can enumerate at once (anti-scraping).
+const PENDING_JOB_LIMIT = 50
+
 // Collect every item photo on a job (multi-item jobs carry a photo per item),
 // falling back to the legacy single photo_url. Drivers need to SEE what they're
 // picking up before they accept, so we show these thumbnails on the card.
@@ -19,6 +32,19 @@ function jobPhotos(job: any): string[] {
   const fromItems = Array.isArray(job.items) ? job.items.map((it: any) => it?.photo_url) : []
   const all = [...fromItems, job.photo_url].filter(Boolean)
   return Array.from(new Set(all))
+}
+
+// Suburb-level locality for the OPEN-jobs feed. We never show the exact street
+// address of a job the driver hasn't accepted yet -- just the suburb -- so the
+// open feed can't be used to target specific pickup addresses. The precise
+// address appears once the driver accepts (on the job-detail page).
+function locality(address?: string | null): string {
+  if (!address) return 'Melbourne area'
+  const parts = address.split(',').map(s => s.trim()).filter(Boolean)
+  // "12 Smith St, Yarraville VIC 3013" -> the segment after the street is the suburb.
+  const seg = parts.length > 1 ? parts[1] : parts[0]
+  const suburb = seg.replace(/\b(VIC|NSW|QLD|SA|WA|TAS|NT|ACT)\b/gi, '').replace(/\d{4}/g, '').trim()
+  return suburb || seg
 }
 
 // How often to re-fetch jobs as a fallback in case the realtime websocket
@@ -54,11 +80,15 @@ export default function DriverDashboardPage() {
     const { data: d } = await supabase.from('drivers').select('*, profile:profiles(id, full_name, role)').eq('user_id', user.id).single()
     if (!d) { router.push('/driver/onboard'); return }
     setDriver(d)
-    // No customer profile join here -- drivers don't need any customer
-    // personal details to decide on a job, and this keeps phone numbers and
-    // names out of the browser payload entirely.
-    const { data: pending } = await supabase.from('jobs').select('*').eq('status', 'pending').order('created_at', { ascending: false })
-    setJobs(pending ?? [])
+    // Open jobs: coarse columns only (no exact GPS, no buyer identity) and capped
+    // at PENDING_JOB_LIMIT so the open feed can't be scraped for every job's
+    // precise pickup location. Full detail is exposed only on accept.
+    const { data: pending } = await supabase.from('jobs')
+      .select(PENDING_JOB_COLUMNS)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(PENDING_JOB_LIMIT)
+    setJobs((pending ?? []) as unknown as Job[])
     const { data: mine } = await supabase.from('jobs').select('*').eq('driver_id', d.id).in('status', ['accepted', 'picked_up']).order('created_at', { ascending: false })
     setMyJobs(mine ?? [])
     setLoading(false)
@@ -235,10 +265,11 @@ export default function DriverDashboardPage() {
               {job.helper_note && (
                 <div className="mb-3 text-xs text-slate-500">📝 {job.helper_note}</div>
               )}
+              {/* Suburb-level only until accepted (exact address revealed on accept). */}
               <div className="flex items-center gap-2 text-sm text-slate-600 mb-3">
-                <span>{job.pickup_address.split(',')[0]}</span>
+                <span>{locality(job.pickup_address)}</span>
                 <span className="text-slate-300">to</span>
-                <span>{job.dropoff_address.split(',')[0]}</span>
+                <span>{locality(job.dropoff_address)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-slate-400">{job.scheduled_for ? new Date(job.scheduled_for).toLocaleDateString('en-AU') : 'ASAP'}</span>
