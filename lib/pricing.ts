@@ -1,15 +1,15 @@
 /**
- * VanGo Pricing Engine
+ * Vanute Pricing Engine
  *
  * SINGLE SOURCE OF TRUTH for the rules is PRICING_ANALYTICS_POLICY.md.
  * Keep the numbers here in sync with that doc as we tune from real delivery data.
  *
  * driver_fee (cash / PayID) =
  *     (main_item_base x time_multiplier)
- *   + distance_fee (flat 30c per km, pickup -> dropoff)
+ *   + distance_fee (TIERED: 30c/km first 50km, 60c/km 50-150km; >150km = quote-on-request)
  *   + extra_item_fee (flat, per additional item from the SAME pickup)
  *   + extra_stops_fee (flat, per additional pickup/dropoff address),
- *   then ROUNDED UP to nearest $5.
+ *   then ROUNDED UP to nearest $5, then floored at MIN_DRIVER_FEE if any item is picked up.
  * A per-driver fuel surcharge for the driver->pickup leg is added when matched.
  * service_fee (card, platform revenue) = $11.99 flat.
  *
@@ -23,7 +23,8 @@
  * so "fridge marked as small" is impossible. Only "Other" lets the customer
  * choose, and the driver can re-rate any item at pickup when they see it.
  * Small / very-small items (boxes, bags, small appliances) are NOT charged a
- * driver fee at all -- only the flat service fee applies.
+ * driver fee at all -- but the whole job is still floored at MIN_DRIVER_FEE so
+ * a driver is never asked to do a pickup for $0.
  */
 import type { ItemSize } from '@/types'
 
@@ -31,8 +32,18 @@ import type { ItemSize } from '@/types'
 export const BASE_FEES: Record<ItemSize, number> = { small: 0, medium: 55, large: 85, xlarge: 130 }
 const BASE = BASE_FEES
 
-// Flat distance charge, applied per km of the pickup -> dropoff leg.
-export const DISTANCE_RATE_PER_KM = 0.30
+// Distance charge. TIERED so metro stays cheap but longer legs actually pay the
+// driver -- a flat 30c/km loses money past the metro fringe (a 700km interstate
+// run would price at a guaranteed loss no driver accepts). See distanceFeeForKm.
+export const DISTANCE_RATE_PER_KM = 0.30       // metro rate, first LONG_DISTANCE_TIER_KM
+export const DISTANCE_RATE_LONG_PER_KM = 0.60  // 50-150 km leg
+export const LONG_DISTANCE_TIER_KM = 50        // metro rate applies up to here
+export const MAX_QUOTED_KM = 150               // beyond this: quote-on-request (see quoteRequired)
+
+// Minimum driver fee whenever ANY item is picked up. Without this, a small-item
+// short-distance job can round to $0 -- "a posted job nobody accepts" is the
+// one failure the launch plan says is fatal.
+export const MIN_DRIVER_FEE = 15
 
 // Flat fee for each ADDITIONAL item collected from the same pickup address.
 // (A second pickup/dropoff ADDRESS is the separate EXTRA_STOP_FEE below.)
@@ -194,6 +205,16 @@ export function roundUpTo5(amount: number): number {
   return Math.ceil(amount / 5) * 5
 }
 
+// Tiered pickup->dropoff distance charge. Metro rate for the first
+// LONG_DISTANCE_TIER_KM, a higher rate for the 50-150km leg so the driver is
+// actually paid for a long run, and beyond MAX_QUOTED_KM the job needs a
+// manual quote (calculatePrice sets quoteRequired). Returns whole dollars.
+export function distanceFeeForKm(km: number): number {
+  const k = Math.max(0, km)
+  if (k <= LONG_DISTANCE_TIER_KM) return Math.round(k * DISTANCE_RATE_PER_KM)
+  return Math.round(LONG_DISTANCE_TIER_KM * DISTANCE_RATE_PER_KM + (k - LONG_DISTANCE_TIER_KM) * DISTANCE_RATE_LONG_PER_KM)
+}
+
 export function isLateNight(at: Date = new Date()): boolean {
   const mins = at.getHours() * 60 + at.getMinutes()
   return mins >= 21 * 60 || mins < 7 * 60 // 9:00pm - 7:00am
@@ -201,8 +222,10 @@ export function isLateNight(at: Date = new Date()): boolean {
 
 /**
  * Time-of-day demand multiplier applied to the main-item base fee.
- * Weekdays are busier (smaller discount); commute peaks get a surcharge;
- * late night is full price. Tune these values in PRICING_ANALYTICS_POLICY.md.
+ * Weekdays are busier; commute peaks get a surcharge; late night is full price.
+ * Weekends are held at full price (1.00): weekends are exactly when Marketplace
+ * pickups spike and when the trial runs, so we must NOT pay drivers least when
+ * demand peaks. Tune these values in PRICING_ANALYTICS_POLICY.md.
  */
 export function pricingMultiplier(at: Date = new Date()): number {
   const day = at.getDay()                 // 0=Sun ... 6=Sat
@@ -214,7 +237,7 @@ export function pricingMultiplier(at: Date = new Date()): number {
     (mins >= 16 * 60 && mins <= 18 * 60 + 30)               // 4:00-6:30pm
   )
   if (weekdayPeak) return 1.10                              // +10% commute-peak surcharge
-  if (isWeekend) return 0.85                                // weekend daytime: 15% off
+  if (isWeekend) return 1.00                                // weekend: full price (demand peak)
   return 0.95                                               // weekday off-peak daytime: 5% off
 }
 
@@ -244,6 +267,7 @@ export interface PriceBreakdown {
   driverFee: number
   serviceFee: number
   total: number
+  quoteRequired: boolean
 }
 
 /**
@@ -254,9 +278,13 @@ export interface PriceBreakdown {
  */
 export function calculatePrice(items: PriceItem[], distanceKm: number, extraStops: ExtraStops = {}, at: Date = new Date()): PriceBreakdown {
   const timeMultiplier = pricingMultiplier(at)
-  const distanceFee = Math.round(Math.max(0, distanceKm) * DISTANCE_RATE_PER_KM)
+  const distanceFee = distanceFeeForKm(distanceKm)
+  // Beyond the quotable radius we can't guarantee a driver at an auto price --
+  // the posting UI should block/quote when this is true.
+  const quoteRequired = Math.max(0, distanceKm) > MAX_QUOTED_KM
   if (items.length === 0) {
-    return { items: [], distanceFee, extraStopsFee: 0, timeMultiplier, driverFee: roundUpTo5(distanceFee), serviceFee: SERVICE_FEE, total: roundUpTo5(distanceFee) + SERVICE_FEE }
+    const noItemFee = roundUpTo5(distanceFee)
+    return { items: [], distanceFee, extraStopsFee: 0, timeMultiplier, driverFee: noItemFee, serviceFee: SERVICE_FEE, total: noItemFee + SERVICE_FEE, quoteRequired }
   }
 
   // Resolve each item to its effective (priced) size, then order largest-first
@@ -281,8 +309,10 @@ export function calculatePrice(items: PriceItem[], distanceKm: number, extraStop
   // Time multiplier applies to the main item's loading work only. Distance,
   // extra items and extra stops are flat, predictable add-ons.
   const adjusted = mainFee * timeMultiplier + distanceFee + extrasTotal + extraStopsFee
-  const driverFee = roundUpTo5(adjusted) // cash / PayID to driver, rounded UP to nearest $5
-  return { items: lineItems, distanceFee, extraStopsFee, timeMultiplier, driverFee, serviceFee: SERVICE_FEE, total: driverFee + SERVICE_FEE }
+  // Round UP to nearest $5, then floor at MIN_DRIVER_FEE -- a driver is never
+  // asked to do a real pickup for less (e.g. a boxes-only short hop).
+  const driverFee = Math.max(MIN_DRIVER_FEE, roundUpTo5(adjusted))
+  return { items: lineItems, distanceFee, extraStopsFee, timeMultiplier, driverFee, serviceFee: SERVICE_FEE, total: driverFee + SERVICE_FEE, quoteRequired }
 }
 
 /**
