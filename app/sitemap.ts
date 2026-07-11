@@ -1,6 +1,6 @@
 import type { MetadataRoute } from 'next'
 
-const SITE_URL = 'https://getvango.com.au'
+const SITE_URL = 'https://vanute.com.au'
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date()
