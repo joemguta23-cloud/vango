@@ -7,7 +7,7 @@ export default function robots(): MetadataRoute.Robots {
       allow: '/',
       disallow: ['/admin', '/api/'],
     },
-    sitemap: 'https://getvango.com.au/sitemap.xml',
-    host: 'https://getvango.com.au',
+    sitemap: 'https://vanute.com.au/sitemap.xml',
+    host: 'https://vanute.com.au',
   }
 }
