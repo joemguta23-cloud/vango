@@ -283,7 +283,7 @@ export default function PostJobPage() {
       job_id: job.id, status: 'pending', note: 'Job posted -- finding driver',
     })
 
-    // Charge the VanGo service fee via Stripe Checkout (card / Apple Pay / Google Pay).
+    // Charge the Vanute service fee via Stripe Checkout (card / Apple Pay / Google Pay).
     // The driver's fee stays cash / PayID on delivery. If Checkout can't be created for any
     // reason, don't strand the buyer -- the job is already posted, so fall through to tracking.
     try {
@@ -498,7 +498,7 @@ export default function PostJobPage() {
             <div>
               <label className="label">Can you arrange help for the heavy lifting?</label>
               <p className="text-xs text-slate-500 mb-3">
-                Your VanGo driver comes solo -- they don't bring a partner. For heavy items, having someone at either end makes the job safer and faster. This is your responsibility to arrange (a friend, family member, the seller, etc.).
+                Your Vanute driver comes solo -- they don't bring a partner. For heavy items, having someone at either end makes the job safer and faster. This is your responsibility to arrange (a friend, family member, the seller, etc.).
               </p>
 
               <div className="space-y-3">
@@ -646,6 +646,14 @@ export default function PostJobPage() {
                   <span className="text-sm text-slate-500">Select both addresses from the autocomplete suggestions to calculate distance.</span>
                 </div>
               )}
+              {/* Long-distance guard: beyond the auto-quote radius (see MAX_QUOTED_KM
+                  in lib/pricing.ts) we can't guarantee an instant driver match at a
+                  fixed price, so posting is blocked in favour of a custom quote. */}
+              {price.quoteRequired && (
+                <div className="mt-2 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5 text-xs text-amber-800">
+                  🚚 <strong>Long-distance job (over 150 km).</strong> This is beyond our standard instant-quote range, so we can't guarantee an auto driver match at a fixed price. Please <a href="mailto:admin@getvango.com.au?subject=Long-distance%20delivery%20quote" className="underline font-semibold">contact us for a custom quote</a> and we'll arrange a driver for you.
+                </div>
+              )}
             </div>
 
             {/* Access notes -- folded into the helper note on submit so the
@@ -707,7 +715,7 @@ export default function PostJobPage() {
                     </div>
                   )}
                   <div className="flex justify-between">
-                    <span className="text-orange-700">VanGo service fee</span>
+                    <span className="text-orange-700">Vanute service fee</span>
                     {appliedDiscount ? (
                       <span className="font-bold">
                         <span className="line-through text-orange-300 mr-1.5">${money(price.serviceFee)}</span>
@@ -737,9 +745,9 @@ export default function PostJobPage() {
 
             <div className="flex gap-3">
               <button onClick={() => setStep(2)} className="btn-secondary flex-1 justify-center">← Back</button>
-              <button onClick={handleSubmit} disabled={!locationValid || loading}
+              <button onClick={handleSubmit} disabled={!locationValid || loading || price.quoteRequired}
                 className="btn-primary flex-[2] justify-center disabled:opacity-50">
-                {loading ? 'Posting…' : `🚐 Find a Driver → ${money(displayTotal)}`}
+                {loading ? 'Posting…' : price.quoteRequired ? 'Over 150 km — contact us for a quote' : `🚐 Find a Driver → ${money(displayTotal)}`}
               </button>
             </div>
           </div>
