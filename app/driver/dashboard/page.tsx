@@ -12,13 +12,12 @@ const ITEM_ICONS: Record<string, string> = {
   'Tools':'Tools','Garden':'Garden','Materials':'Materials','Other':'Item',
 }
 
-// Coarse column list for PENDING (not-yet-accepted) jobs. Drivers browsing the
-// open-jobs feed get only what the card needs to decide -- deliberately NO exact
+// Coarse column list for PENDING (not-yet-accepted) jobs -- used as a FALLBACK
+// only, until migration_007's `available_jobs` view exists. Deliberately NO exact
 // GPS coordinates (pickup_lat/lng, dropoff_lat/lng), NO buyer_id, and none of the
 // second-stop address/coord fields. Precise coordinates + full identity are only
 // exposed to the ONE driver who accepts (the job-detail page refetches by id, and
-// RLS returns full data to the assigned driver). This keeps an "online driver"
-// from bulk-harvesting every Marketplace pickup's exact location.
+// RLS returns full data to the assigned driver).
 const PENDING_JOB_COLUMNS =
   'id, status, driver_id, item_type, item_size, items, photo_url, item_description, helper_note, driver_fee, scheduled_for, created_at, pickup_address, dropoff_address'
 
@@ -34,10 +33,10 @@ function jobPhotos(job: any): string[] {
   return Array.from(new Set(all))
 }
 
-// Suburb-level locality for the OPEN-jobs feed. We never show the exact street
-// address of a job the driver hasn't accepted yet -- just the suburb -- so the
-// open feed can't be used to target specific pickup addresses. The precise
-// address appears once the driver accepts (on the job-detail page).
+// Suburb-level locality for the OPEN-jobs feed. The `available_jobs` view already
+// returns suburb-only in pickup_address/dropoff_address; on the fallback path the
+// raw address is still present, so this trims it to the suburb as a second guard.
+// Either way the open feed never shows the exact street of an un-accepted job.
 function locality(address?: string | null): string {
   if (!address) return 'Melbourne area'
   const parts = address.split(',').map(s => s.trim()).filter(Boolean)
@@ -80,14 +79,21 @@ export default function DriverDashboardPage() {
     const { data: d } = await supabase.from('drivers').select('*, profile:profiles(id, full_name, role)').eq('user_id', user.id).single()
     if (!d) { router.push('/driver/onboard'); return }
     setDriver(d)
-    // Open jobs: coarse columns only (no exact GPS, no buyer identity) and capped
-    // at PENDING_JOB_LIMIT so the open feed can't be scraped for every job's
-    // precise pickup location. Full detail is exposed only on accept.
-    const { data: pending } = await supabase.from('jobs')
-      .select(PENDING_JOB_COLUMNS)
-      .eq('status', 'pending')
-      .order('created_at', { ascending: false })
-      .limit(PENDING_JOB_LIMIT)
+    // Open jobs: read the coarse, suburb-only `available_jobs` view (no exact GPS,
+    // no buyer identity, capped at 50 in the view). Until migration_007 creates
+    // that view, fall back to a coarse direct query so the feed works either way.
+    let pending: any[] | null = null
+    const feed = await supabase.from('available_jobs').select('*')
+    if (!feed.error && feed.data) {
+      pending = feed.data
+    } else {
+      const fb = await supabase.from('jobs')
+        .select(PENDING_JOB_COLUMNS)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(PENDING_JOB_LIMIT)
+      pending = fb.data ?? null
+    }
     setJobs((pending ?? []) as unknown as Job[])
     const { data: mine } = await supabase.from('jobs').select('*').eq('driver_id', d.id).in('status', ['accepted', 'picked_up']).order('created_at', { ascending: false })
     setMyJobs(mine ?? [])
