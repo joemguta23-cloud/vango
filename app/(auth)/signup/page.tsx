@@ -33,7 +33,7 @@ function SignupForm() {
   return (
     <div className="card">
       <h1 className="text-2xl font-black mb-1">Create your account</h1>
-      <p className="text-slate-500 text-sm mb-6">Join VanGo — it's free</p>
+      <p className="text-slate-500 text-sm mb-6">Join Vanute — it's free</p>
       <div className="flex bg-slate-100 rounded-xl p-1 mb-6">
         {['buyer','driver'].map(r => (
           <button key={r} type="button" onClick={() => setRole(r)}
@@ -65,7 +65,7 @@ function SignupForm() {
               </option>
             ))}
           </select>
-          <p className="text-xs text-slate-400 mt-1">VanGo currently operates in Victoria. More states are coming soon.</p>
+          <p className="text-xs text-slate-400 mt-1">Vanute currently operates in Victoria. More states are coming soon.</p>
         </div>
         {error && <p className="text-red-500 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
         <button type="submit" disabled={loading} className="btn-primary w-full justify-center py-3 text-base mt-2">
@@ -84,15 +84,14 @@ export default function SignupPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-16">
       <div className="w-full max-w-md">
-        <a href="/" className="flex items-center gap-2 font-black text-xl text-slate-800 mb-8 justify-center">
-          <span className="w-9 h-9 bg-orange-500 rounded-lg flex items-center justify-center text-lg">🚐</span>
-          Van<span className="text-orange-500">Go</span>
+        <a href="/" className="flex justify-center mb-8">
+          <img src="/vanute-logo.png" alt="Vanute" className="h-14 w-auto" />
         </a>
         <Suspense fallback={<div className="card text-center py-8 text-slate-400">Loading…</div>}>
           <SignupForm />
         </Suspense>
         <p className="text-center text-xs text-slate-400 mt-4 px-4">
-          By signing up you agree to VanGo's Terms of Service and Privacy Policy.
+          By signing up you agree to Vanute's Terms of Service and Privacy Policy.
         </p>
       </div>
     </div>
