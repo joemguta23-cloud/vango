@@ -30,7 +30,7 @@ export default function Nav() {
     <nav className="fixed top-0 inset-x-0 z-50 bg-white/95 backdrop-blur border-b border-slate-200 h-16">
       <div className="max-w-6xl mx-auto h-full flex items-center justify-between px-4 sm:px-6">
         <Link href="/" className="flex items-center shrink-0" aria-label="Vanute home">
-          <img src="/vanute-logo.png" alt="Vanute" className="h-11 w-auto" />
+          <img src="/vanute-logo.png" alt="Vanute" className="h-14 w-auto" />
         </Link>
 
         {/* Desktop */}
