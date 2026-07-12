@@ -14,6 +14,7 @@ function SignupForm() {
   const [form, setForm] = useState({ full_name: '', phone: '', email: '', password: '', state: DEFAULT_REGION })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false)
   const supabase = createSupabaseBrowserClient()
 
   const handleSubmit = async (e) => {
@@ -21,14 +22,39 @@ function SignupForm() {
     setLoading(true); setError('')
     const { data, error: signUpError } = await supabase.auth.signUp({
       email: form.email, password: form.password,
-      options: { data: { full_name: form.full_name, phone: form.phone, role, state: form.state } },
+      options: {
+        data: { full_name: form.full_name, phone: form.phone, role, state: form.state },
+        // After the welcome/confirmation email is clicked, land on the auth
+        // callback so role-based routing (incl. driver upgrade) still runs.
+        emailRedirectTo: `${window.location.origin}/auth/callback?role=${role}`,
+      },
     })
     if (signUpError) { setError(signUpError.message); setLoading(false); return }
+    // When email confirmation is enabled in Supabase, no session is returned
+    // until the user clicks the link in their welcome email.
+    if (!data.session) { setLoading(false); setAwaitingConfirm(true); return }
     await new Promise(r => setTimeout(r, 800))
     router.push(role === 'driver' ? '/driver/onboard' : '/buyer/post')
   }
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  if (awaitingConfirm) {
+    return (
+      <div className="card text-center py-6">
+        <div className="text-4xl mb-3">📬</div>
+        <h1 className="text-xl font-black mb-2">Welcome to Vanute — check your email</h1>
+        <p className="text-slate-500 text-sm leading-relaxed px-2">
+          We&rsquo;ve sent a welcome email to <strong className="text-slate-700">{form.email}</strong> from our
+          no-reply address. Click the link inside to confirm your account and you&rsquo;ll be signed straight in.
+        </p>
+        <p className="text-slate-400 text-xs mt-3">Can&rsquo;t see it? Check your spam folder.</p>
+        <p className="text-center text-sm mt-5">
+          <a href="/login" className="text-orange-500 font-semibold hover:underline">Back to log in</a>
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="card">
@@ -65,7 +91,7 @@ function SignupForm() {
               </option>
             ))}
           </select>
-          <p className="text-xs text-slate-400 mt-1">Vanute currently operates in Victoria. More states are coming soon.</p>
+          <p className="text-xs text-slate-400 mt-1">Vanute is rolling out across Australia — Victoria is live first, more states are opening soon.</p>
         </div>
         {error && <p className="text-red-500 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
         <button type="submit" disabled={loading} className="btn-primary w-full justify-center py-3 text-base mt-2">
@@ -84,8 +110,9 @@ export default function SignupPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-16">
       <div className="w-full max-w-md">
-        <a href="/" className="flex justify-center mb-8">
-          <img src="/vanute-logo.png" alt="Vanute" className="h-14 w-auto" />
+        <a href="/" className="flex items-center gap-2 font-black text-xl text-slate-800 mb-8 justify-center">
+          <span className="w-9 h-9 bg-orange-500 rounded-lg flex items-center justify-center text-lg">🚐</span>
+          Van<span className="text-orange-500">ute</span>
         </a>
         <Suspense fallback={<div className="card text-center py-8 text-slate-400">Loading…</div>}>
           <SignupForm />
