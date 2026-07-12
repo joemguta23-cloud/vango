@@ -26,9 +26,8 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-md">
-        <a href="/" className="flex items-center gap-2 font-black text-xl text-slate-800 mb-8 justify-center">
-          <span className="w-9 h-9 bg-orange-500 rounded-lg flex items-center justify-center text-lg">🚐</span>
-          Van<span className="text-orange-500">ute</span>
+        <a href="/" className="flex justify-center mb-8">
+          <img src="/vanute-logo.png" alt="Vanute" className="h-14 w-auto" />
         </a>
         <div className="card">
           <h1 className="text-2xl font-black mb-6">Log in</h1>
