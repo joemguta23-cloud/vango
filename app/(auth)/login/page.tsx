@@ -47,7 +47,11 @@ export default function LoginPage() {
             <button type="submit" disabled={loading} className="btn-primary w-full justify-center">{loading ? 'Logging in...' : 'Log in'}</button>
           </form>
 
-          <p className="text-center text-sm mt-4"><Link href="/signup" className="text-orange-500">Create account</Link></p>
+          <p className="text-center text-sm mt-4">
+            <Link href="/forgot-password" className="text-slate-500">Forgot password?</Link>
+            <span className="mx-2 text-slate-300">·</span>
+            <Link href="/signup" className="text-orange-500">Create account</Link>
+          </p>
         </div>
       </div>
     </div>
