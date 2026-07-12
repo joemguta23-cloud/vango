@@ -578,7 +578,7 @@ export default function PostJobPage() {
         {/* -- STEP 3: Addresses + price -- */}
         {step === 3 && (
           <div className="space-y-5">
-            {/* Addresses -- Google Places autocomplete captures lat/lng automatically */}
+            {/* Addresses -- Google Places suggestions capture lat/lng automatically */}
             <div>
               <label className="label">Pickup & Dropoff *</label>
               <div className="flex gap-3 items-start">
@@ -588,14 +588,15 @@ export default function PostJobPage() {
                   <div className="w-3 h-3 rounded-full bg-orange-500" />
                 </div>
                 <div className="flex-1 space-y-2">
-                  <AddressAutocomplete placeholder="Pickup: seller's full address + suburb + postcode"
+                  <AddressAutocomplete placeholder="Pickup address"
                     value={pickup}
                     onChange={(address, lat, lng) => { setPickup(address); setPickupLat(lat); setPickupLng(lng) }} />
-                  <AddressAutocomplete placeholder="Dropoff: your delivery address + suburb + postcode"
+                  <AddressAutocomplete placeholder="Dropoff address"
                     value={dropoff}
                     onChange={(address, lat, lng) => { setDropoff(address); setDropoffLat(lat); setDropoffLng(lng) }} />
                 </div>
               </div>
+              <p className="text-xs text-slate-400 mt-1.5">Start typing, then tap your address in the list — it fills in instantly, including suburb and postcode.</p>
             </div>
 
             {/* Multi-pickup / multi-dropoff toggles */}
@@ -610,7 +611,7 @@ export default function PostJobPage() {
                   className="w-5 h-5 accent-green-500 flex-shrink-0" />
               </label>
               {hasSecondPickup && (
-                <AddressAutocomplete placeholder="2nd pickup: full address + suburb + postcode"
+                <AddressAutocomplete placeholder="2nd pickup address"
                   value={secondPickup}
                   onChange={(address, lat, lng) => { setSecondPickup(address); setSecondPickupLat(lat); setSecondPickupLng(lng) }} />
               )}
@@ -625,14 +626,14 @@ export default function PostJobPage() {
                   className="w-5 h-5 accent-orange-500 flex-shrink-0" />
               </label>
               {hasSecondDropoff && (
-                <AddressAutocomplete placeholder="2nd dropoff: full address + suburb + postcode"
+                <AddressAutocomplete placeholder="2nd dropoff address"
                   value={secondDropoff}
                   onChange={(address, lat, lng) => { setSecondDropoff(address); setSecondDropoffLat(lat); setSecondDropoffLng(lng) }} />
               )}
             </div>
 
             {/* Distance -- calculated automatically from the pickup/dropoff
-                coordinates captured by autocomplete above. Flat per-km charge. */}
+                coordinates captured by the address suggestions. Flat per-km charge. */}
             <div>
               <label className="label">Distance (auto-calculated)</label>
               {distanceKm != null ? (
@@ -643,7 +644,7 @@ export default function PostJobPage() {
                 </div>
               ) : (
                 <div className="flex items-center gap-3 p-3 rounded-xl border-2 border-slate-200 bg-slate-50">
-                  <span className="text-sm text-slate-500">Select both addresses from the autocomplete suggestions to calculate distance.</span>
+                  <span className="text-sm text-slate-500">Pick both addresses from the suggestion list and the distance fills in automatically.</span>
                 </div>
               )}
               {/* Long-distance guard: beyond the auto-quote radius (see MAX_QUOTED_KM
