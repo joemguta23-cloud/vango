@@ -8,7 +8,7 @@ interface AddressAutocompleteProps {
 }
 
 // Melbourne CBD -- biases (does not restrict) results toward Victoria, since
-// VanGo currently only operates in Melbourne & Victoria.
+// Vanute is live in Melbourne & Victoria first (Australia-wide rollout).
 const VIC_BIAS = { lat: -37.8136, lng: 144.9631 }
 
 let mapsLoadPromise: Promise<void> | null = null
@@ -22,6 +22,10 @@ function loadGoogleMaps(): Promise<void> {
     const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
     if (!key) { reject(new Error('Missing NEXT_PUBLIC_GOOGLE_MAPS_API_KEY')); return }
     w.__vangoMapsLoaded = () => resolve()
+    // If Google rejects the key at runtime (e.g. a referrer/quota problem) it
+    // calls gm_authFailure -- treat that as "no autocomplete" and fall back to
+    // a plain input instead of leaving Google's error overlay in the way.
+    w.gm_authFailure = () => reject(new Error('Google Maps auth failure (check key referrers)'))
     const script = document.createElement('script')
     script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async&callback=__vangoMapsLoaded`
     script.async = true
@@ -39,6 +43,8 @@ function loadGoogleMaps(): Promise<void> {
 // If the Maps script or the new element fails to load for any reason, we
 // fall back to a plain text input so the buyer can still type an address by
 // hand (lat/lng default to a Melbourne-area fallback at submit time).
+// Selecting a suggestion applies it instantly (gmp-select) -- no extra
+// confirm step.
 export default function AddressAutocomplete({ placeholder, value, onChange }: AddressAutocompleteProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [ready, setReady] = useState(false)
@@ -73,7 +79,7 @@ export default function AddressAutocomplete({ placeholder, value, onChange }: Ad
         if (!cancelled) setReady(true)
       })
       .catch((err) => {
-        console.error('Google Places autocomplete unavailable, falling back to plain input', err)
+        console.error('Address suggestions unavailable, falling back to plain input', err)
         if (!cancelled) setFallback(true)
       })
     return () => { cancelled = true }
@@ -91,7 +97,7 @@ export default function AddressAutocomplete({ placeholder, value, onChange }: Ad
     <div>
       <div ref={containerRef} className="vango-places-input" />
       {!ready && (
-        <input className="input" placeholder={`${placeholder} (loading autocomplete...)`} value={value}
+        <input className="input" placeholder={placeholder} value={value}
           onChange={e => onChange(e.target.value, null, null)} />
       )}
     </div>
