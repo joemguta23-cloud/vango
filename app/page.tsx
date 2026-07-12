@@ -3,7 +3,7 @@ import Nav from '@/components/Nav'
 
 const CATEGORIES = [
   { icon: '🧊', name: 'Fridge' }, { icon: '🌀', name: 'Washing Machine' },
-  { icon: '🛏️', name: 'Mattress' }, { icon: '🛋️', name: 'Couch/Sofa' },
+  { icon: '🛏️', name: 'Bed / Mattress' }, { icon: '🛋️', name: 'Couch/Sofa' },
   { icon: '🖥️', name: 'TV / Desk' }, { icon: '🚪', name: 'Wardrobe' },
   { icon: '🍽️', name: 'Dining Table' }, { icon: '🧰', name: 'Tools / Gear' },
   { icon: '🏋️', name: 'Gym Equipment' }, { icon: '🌿', name: 'Garden' },
@@ -13,7 +13,7 @@ const CATEGORIES = [
 const STEPS = [
   { n: '1', title: 'Post your item', desc: 'Take a photo, select the item type, and enter pickup and dropoff addresses. Done in under 2 minutes.' },
   { n: '2', title: 'Get matched instantly', desc: 'We find the nearest available ute or van driver and assign them your job. You see their name, vehicle, and ETA immediately.' },
-  { n: '3', title: 'Track & receive', desc: "Get notified at every step. Pay the driver cash or PayID on delivery — we charge a small $11.99 service fee." },
+  { n: '3', title: 'Track & receive', desc: 'Get notified at every step. Pay the driver cash or PayID on delivery.' },
 ]
 
 export default function HomePage() {
@@ -26,7 +26,7 @@ export default function HomePage() {
           Big items, delivered <span className="text-orange-500">fast.</span>
         </h1>
         <p className="text-slate-500 text-lg mb-8">
-          Vanute connects Australian buyers and sellers with nearby ute and van drivers for same-day large item delivery — live now in Melbourne, expanding across Australia.
+          Vanute connects Australian buyers and sellers with nearby ute and van drivers for same day large item delivery — live now in Melbourne, expanding across Australia.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <Link href="/signup?role=buyer" className="btn-primary justify-center text-base py-3 px-8">📦 I need delivery</Link>
@@ -77,12 +77,6 @@ export default function HomePage() {
             Vanute is a service operated by <strong className="text-white">A.C.N. 681 822 426 Pty Ltd</strong>{' '}
             (ACN 681&nbsp;822&nbsp;426), a company registered in Australia, trading as &ldquo;Two Minute Van&rdquo;,
             based in Melbourne, Victoria, Australia.
-          </p>
-          <p>
-            Contact:{' '}
-            <a href="mailto:admin@vanute.com.au" className="text-orange-400 font-semibold hover:underline">admin@vanute.com.au</a>
-            {' '}or{' '}
-            <a href="mailto:admin@getvango.com.au" className="text-orange-400 font-semibold hover:underline">admin@getvango.com.au</a>
           </p>
           <p className="space-x-4">
             <Link href="/privacy" className="hover:underline">Privacy Policy</Link>
