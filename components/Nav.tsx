@@ -11,6 +11,18 @@ export default function Nav() {
   const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => {
+    // Safety net: if a password-recovery link lands anywhere except
+    // /reset-password (e.g. an allow-list fallback to the homepage), forward
+    // it there with the tokens intact so the user always gets the
+    // "choose a new password" form instead of being dumped on the homepage.
+    if (typeof window !== 'undefined') {
+      const h = window.location.hash || ''
+      const q = window.location.search || ''
+      if (!window.location.pathname.startsWith('/reset-password') && (h + q).includes('type=recovery')) {
+        window.location.replace('/reset-password' + q + h)
+        return
+      }
+    }
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return
       // Only the fields the nav needs (never the phone column, which is
