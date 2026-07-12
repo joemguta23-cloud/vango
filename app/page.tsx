@@ -80,6 +80,8 @@ export default function HomePage() {
           </p>
           <p>
             Contact:{' '}
+            <a href="mailto:admin@vanute.com.au" className="text-orange-400 font-semibold hover:underline">admin@vanute.com.au</a>
+            {' '}or{' '}
             <a href="mailto:admin@getvango.com.au" className="text-orange-400 font-semibold hover:underline">admin@getvango.com.au</a>
           </p>
           <p className="space-x-4">
