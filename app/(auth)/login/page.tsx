@@ -26,8 +26,9 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-md">
-        <a href="/" className="flex justify-center mb-8">
-          <img src="/vanute-logo.png" alt="Vanute" className="h-14 w-auto" />
+        <a href="/" className="flex items-center gap-2 font-black text-xl text-slate-800 mb-8 justify-center">
+          <span className="w-9 h-9 bg-orange-500 rounded-lg flex items-center justify-center text-lg">🚐</span>
+          Van<span className="text-orange-500">ute</span>
         </a>
         <div className="card">
           <h1 className="text-2xl font-black mb-6">Log in</h1>
@@ -47,11 +48,10 @@ export default function LoginPage() {
             <button type="submit" disabled={loading} className="btn-primary w-full justify-center">{loading ? 'Logging in...' : 'Log in'}</button>
           </form>
 
-          <p className="text-center text-sm mt-4">
-            <Link href="/forgot-password" className="text-slate-500">Forgot password?</Link>
-            <span className="mx-2 text-slate-300">·</span>
-            <Link href="/signup" className="text-orange-500">Create account</Link>
+          <p className="text-center text-sm mt-3">
+            <Link href="/forgot-password" className="text-slate-500 hover:text-orange-500 hover:underline">Forgot your password?</Link>
           </p>
+          <p className="text-center text-sm mt-2"><Link href="/signup" className="text-orange-500">Create account</Link></p>
         </div>
       </div>
     </div>
