@@ -58,11 +58,26 @@ export default function DriverJobPage() {
   const [adjusting, setAdjusting] = useState(false)
   const [adjustError, setAdjustError] = useState('')
 
+  // Customer change-request (Uber-style): the buyer edited the job after
+  // this driver accepted. Nothing changes until the driver responds here.
+  const [responding, setResponding] = useState(false)
+
   const fetchJob = () =>
     supabase.from('jobs').select('*, buyer:profiles(full_name)').eq('id', jobId).single()
       .then(({ data }) => { setJob(data as Job); setLoading(false) })
 
   useEffect(() => { fetchJob() }, [jobId])
+
+  // Realtime: refresh this page the moment the job row changes — most
+  // importantly when the customer submits a change request while the driver
+  // has this screen open (the red banner appears instantly), or when the
+  // request is superseded/cleared.
+  useEffect(() => {
+    const channel = supabase.channel(`driver-job-${jobId}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'jobs', filter: `id=eq.${jobId}` }, fetchJob)
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [jobId])
 
   // Share this driver's live GPS position while the job is actively out for
   // delivery, so the customer can see the driver approaching on the map (like
@@ -102,6 +117,13 @@ export default function DriverJobPage() {
 
   const advanceStatus = async () => {
     if (!job) return
+    // HARD GATE: while the customer's change request is unanswered, the job
+    // cannot progress — the driver must Accept or Decline the changes first
+    // (they may otherwise pick up the wrong item or drive to the old address).
+    if ((job as any).pending_changes?.fields && job.status === 'accepted') {
+      alert('The customer changed this job — please Accept or Decline the changes first (red banner above).')
+      return
+    }
     const next = NEXT_STATUS[job.status]
     const proof = PROOF_LABEL[job.status]
     if (!next) return
@@ -164,6 +186,43 @@ export default function DriverJobPage() {
       setJob(j => j ? { ...j, status: next.status as any } : j)
     }
     setUpdating(false)
+  }
+
+  // Respond to the customer's change request. Accept applies the new details
+  // to the job; Decline releases the driver penalty-free and puts the job
+  // (with the customer's new details) straight back into the live pool.
+  const respondChange = async (action: 'accept' | 'decline') => {
+    if (!job) return
+    const pcFields = (job as any).pending_changes?.fields
+    const confirmMsg = action === 'accept'
+      ? `Accept the customer's changes? The job updates to the new details${pcFields?.driver_fee != null ? ` and the cash fee becomes $${money(pcFields.driver_fee)}` : ''}.`
+      : "Decline the changes and release this job? No penalty for you — it goes back into the pool for other drivers and you're free to take other jobs."
+    if (!window.confirm(confirmMsg)) return
+    setResponding(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/jobs/respond-change', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+        body: JSON.stringify({ jobId, action }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data.error || 'Could not submit your response — please try again.')
+        setResponding(false)
+        return
+      }
+      if (action === 'decline') {
+        alert("You've been released from this job — no penalty. It's back in the pool for other drivers.")
+        router.push('/driver/dashboard')
+        return
+      }
+      await fetchJob()
+      alert('Changes accepted — the job below now shows the updated details.')
+    } catch {
+      alert('Could not submit your response — check your connection.')
+    }
+    setResponding(false)
   }
 
   // Call the customer. Numbers stay hidden from the page itself -- the server
@@ -254,12 +313,15 @@ export default function DriverJobPage() {
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="text-5xl animate-bounce">Loading...</div></div>
   if (!job) return <div className="min-h-screen flex items-center justify-center">Job not found.</div>
 
+  const pc: any = (job as any).pending_changes
+  const changesPending = !!pc?.fields && job.status === 'accepted'
+  const newFee = pc?.fields?.driver_fee
   const nextAction = NEXT_STATUS[job.status]
   const proofNeeded = PROOF_LABEL[job.status]
   const showLocationBanner = LIVE_TRACKING_STATUSES.includes(job.status)
   const hasExtraStops = !!(job.second_pickup_address || job.second_dropoff_address)
   const canCancel = job.status === 'accepted' || job.status === 'picked_up'
-  const canAdjust = job.status === 'accepted' || job.status === 'picked_up'
+  const canAdjust = (job.status === 'accepted' || job.status === 'picked_up') && !changesPending
   const biggerSizes = SIZE_ORDER.slice(SIZE_ORDER.indexOf(job.item_size) + 1) as ItemSize[]
   const itemPhotos = (Array.isArray((job as any).items) ? (job as any).items.map((it: any) => it?.photo_url) : [job.photo_url]).filter(Boolean)
 
@@ -271,6 +333,38 @@ export default function DriverJobPage() {
           <h1 className="text-xl font-black">Active Job</h1>
           <span className="badge-orange capitalize">{job.status.replace('_',' ')}</span>
         </div>
+
+        {/* 🚨 CUSTOMER CHANGE REQUEST — must be answered before anything else */}
+        {changesPending && (
+          <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-4">
+            <div className="font-black text-red-700 mb-1">🚨 The customer CHANGED this job</div>
+            <p className="text-xs text-red-600 mb-2">
+              Don't keep driving on the old details. Review the changes below, then <strong>Accept</strong> to continue with the new details — or <strong>Decline</strong> to be released penalty-free (the job goes back to the pool for other drivers).
+            </p>
+            {Array.isArray(pc?.summary) && pc.summary.length > 0 && (
+              <ul className="list-disc ml-4 space-y-1 text-sm text-slate-700 mb-2">
+                {pc.summary.map((s: string, i: number) => <li key={i}>{s}</li>)}
+              </ul>
+            )}
+            {pc?.fields?.scheduled_for && (
+              <p className="text-xs text-slate-600 mb-1">🕒 New pickup time: {new Date(pc.fields.scheduled_for).toLocaleString('en-AU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
+            )}
+            {newFee != null && (
+              <p className="text-sm font-bold text-slate-800 mb-3">New cash / PayID fee: ${money(newFee)}{Number(newFee) !== Number(job.driver_fee) ? ` (was $${money(job.driver_fee)})` : ''}</p>
+            )}
+            <div className="flex gap-2">
+              <button onClick={() => respondChange('accept')} disabled={responding}
+                className="flex-1 bg-green-600 text-white font-bold py-3 rounded-xl text-sm hover:bg-green-700 transition-colors disabled:opacity-50">
+                {responding ? '...' : '✅ Accept changes'}
+              </button>
+              <button onClick={() => respondChange('decline')} disabled={responding}
+                className="flex-1 bg-white border-2 border-red-300 text-red-600 font-bold py-3 rounded-xl text-sm hover:bg-red-50 transition-colors disabled:opacity-50">
+                {responding ? '...' : '↩️ Decline — release job'}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-2">Declining is penalty-free for you — the customer changed the deal after you accepted.</p>
+          </div>
+        )}
 
         {showLocationBanner && (
           <div className={`rounded-xl px-4 py-2.5 text-xs font-semibold flex items-center gap-2 ${
@@ -385,7 +479,7 @@ export default function DriverJobPage() {
         )}
 
         {/* Proof photo (REQUIRED to advance the job) */}
-        {nextAction && proofNeeded && (
+        {nextAction && proofNeeded && !changesPending && (
           <div className="card border-blue-200">
             <div className="font-bold text-sm text-slate-700 mb-1">{proofNeeded.title} <span className="text-red-500">*</span></div>
             <p className="text-xs text-slate-500 mb-3">{proofNeeded.hint}</p>
@@ -424,9 +518,9 @@ export default function DriverJobPage() {
         )}
 
         {nextAction && (
-          <button onClick={advanceStatus} disabled={updating || (proofNeeded && !proofFile)}
+          <button onClick={advanceStatus} disabled={updating || changesPending || (proofNeeded && !proofFile)}
             className="btn-primary w-full justify-center py-3.5 text-base disabled:opacity-50">
-            {updating ? 'Updating...' : (proofNeeded && !proofFile) ? '📸 Take the photo first' : nextAction.label}
+            {updating ? 'Updating...' : changesPending ? '⚠️ Respond to the job changes first' : (proofNeeded && !proofFile) ? '📸 Take the photo first' : nextAction.label}
           </button>
         )}
 
@@ -434,7 +528,7 @@ export default function DriverJobPage() {
           Back to dashboard
         </button>
 
-        {canCancel && (
+        {canCancel && !changesPending && (
           <button onClick={cancelJob} disabled={updating}
             className="w-full text-sm text-red-500 font-semibold py-2 hover:text-red-600 transition-colors">
             Cancel job
