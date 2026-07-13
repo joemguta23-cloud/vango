@@ -4,27 +4,28 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Nav from '@/components/Nav'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
-import { calculatePrice, SERVICE_FEE, EXTRA_STOP_FEE, EXTRA_ITEM_FEE, DISTANCE_RATE_PER_KM, haversineKm, kmToZone, ITEM_CATALOG, catalogEntry } from '@/lib/pricing'
+import { calculatePrice, SERVICE_FEE, EXTRA_STOP_FEE, EXTRA_ITEM_FEE, DISTANCE_RATE_PER_KM, haversineKm, kmToZone, ITEM_CATALOG, catalogEntry, allowedSizes, effectiveSize } from '@/lib/pricing'
 import { FEATURE_FLAGS } from '@/lib/featureFlags'
 import AddressAutocomplete from '@/components/AddressAutocomplete'
 import type { ItemSize, JobItem, DistanceZone } from '@/types'
 
 // -- Item catalogue --------------------------------------------------------
 // The catalogue in lib/pricing.ts is the single source of truth: every known
-// item type carries a FIXED price size (by loading time / hands needed /
-// trolley), so the size can't be gamed. Only "Other" lets the customer pick.
+// item type carries a DEFAULT size and a MINIMUM size floor. The customer can
+// adjust the size for any item (a huge desk can be Large), but never below
+// the floor (a fridge is never Small) — see allowedSizes/effectiveSize.
 const CATALOG_SECTIONS: { title: string; sub: string; sizes: (ItemSize | null)[] }[] = [
-  { title: 'Heavy & bulky', sub: 'Two people + often a trolley — priced Large', sizes: ['large'] },
-  { title: 'Extra large', sub: 'Specialist multi-person moves — priced X-Large', sizes: ['xlarge'] },
-  { title: 'Light & easy to load', sub: 'Quick one-person loads — priced Medium', sizes: ['medium'] },
+  { title: 'Heavy & bulky', sub: 'Two people + often a trolley — usually Large', sizes: ['large'] },
+  { title: 'Extra large', sub: 'Specialist multi-person moves — usually X-Large', sizes: ['xlarge'] },
+  { title: 'Light & easy to load', sub: 'Quick one-person loads — usually Medium', sizes: ['medium'] },
   { title: 'Small items', sub: 'Boxes, bags, small appliances — FREE driver fee', sizes: ['small'] },
   { title: 'Something else', sub: "Pick a size and describe it — the driver confirms at pickup", sizes: [null] },
 ]
 
 const ITEM_ICON: Record<string, string> = Object.fromEntries(ITEM_CATALOG.map(i => [i.name, i.icon]))
 
-// Size options shown ONLY for "Other" (no fixed catalogue size).
-const OTHER_SIZES: { key: ItemSize; name: string; desc: string }[] = [
+// All size options; each item shows only the ones at/above its floor.
+const SIZE_OPTIONS: { key: ItemSize; name: string; desc: string }[] = [
   { key: 'small', name: 'Small', desc: 'boxes, packs — free' },
   { key: 'medium', name: 'Medium', desc: 'light, one person' },
   { key: 'large', name: 'Large', desc: 'heavy, two people' },
@@ -100,14 +101,15 @@ export default function PostJobPage() {
   // -- Helpers ------------------------------------------------------------
   const currentItem = items[editingItem]
   const currentEntry = currentItem.item_type ? catalogEntry(currentItem.item_type) : undefined
+  const currentAllowed = currentItem.item_type ? allowedSizes(currentItem.item_type) : SIZE_OPTIONS.map(s => s.key)
   const setCurrentItem = (patch: Partial<DraftItem>) =>
     setItems(prev => prev.map((it, i) => i === editingItem ? { ...it, ...patch } : it))
 
-  // Picking an item type LOCKS its size to the catalogue tier (anti-gaming).
-  // Only "Other" (size: null) keeps the customer's own size choice.
+  // Picking an item type sets its DEFAULT size; the customer can then adjust
+  // within the allowed range (floor..X-Large) below.
   const pickItemType = (name: string) => {
     const entry = catalogEntry(name)
-    setCurrentItem({ item_type: name, item_size: entry?.size ?? currentItem.item_size ?? 'medium' })
+    setCurrentItem({ item_type: name, item_size: entry?.size ?? 'medium' })
   }
 
   const addItem = () => {
@@ -159,8 +161,8 @@ export default function PostJobPage() {
     : null
   const distanceZone: DistanceZone = distanceKm != null ? kmToZone(distanceKm) : 'under_15'
 
-  // Pricing preview -- pass the item TYPE so the engine applies the catalogue
-  // size floor (a fridge can never price below Large), and the real km for
+  // Pricing preview -- pass the item TYPE so the engine applies the per-item
+  // size floor (a fridge can never price below Medium), and the real km for
   // the flat per-km charge.
   const priceItems = items.map(it => ({ size: it.item_size, label: `${it.item_type || 'Item'} (${SIZE_LABEL[it.item_size] ?? it.item_size})`, type: it.item_type }))
   const price = calculatePrice(priceItems, distanceKm ?? 0, {
@@ -226,10 +228,9 @@ export default function PostJobPage() {
         const { data: { publicUrl } } = supabase.storage.from('job-photos').getPublicUrl(path)
         photo_url = publicUrl
       }
-      // Store the size the pricing engine actually used (catalogue floor),
-      // never a client-picked size below it.
-      const entry = catalogEntry(it.item_type)
-      const finalSize = entry?.size ?? it.item_size
+      // Store the size the pricing engine actually used (per-item floor
+      // applied), never a client-picked size below the floor.
+      const finalSize = effectiveSize(it.item_type, it.item_size)
       hydratedItems.push({ item_type: it.item_type, item_size: finalSize, description: it.description || `${it.item_type} delivery`, photo_url })
     }
 
@@ -357,8 +358,9 @@ export default function PostJobPage() {
               </div>
             )}
 
-            {/* Item type picker -- grouped by loading effort; the size/price
-                tier is FIXED per item so heavy items can't be posted cheap. */}
+            {/* Item type picker -- grouped by loading effort. Each type has a
+                DEFAULT size and a FLOOR; the size selector below lets the
+                customer adjust within the allowed range. */}
             <div className={typeMissing ? 'ring-2 ring-red-400 rounded-xl p-1' : ''}>
               <label className="label">What are you moving? *</label>
               <div className="space-y-4">
@@ -392,27 +394,15 @@ export default function PostJobPage() {
               {typeMissing && <p className="text-xs text-red-500 font-semibold mt-1.5">Please pick what you're moving.</p>}
             </div>
 
-            {/* Size -- fixed by the catalogue for known items (anti-gaming);
-                only "Other" lets the customer choose. */}
-            {currentItem.item_type && currentEntry?.size && (
-              <div className={`rounded-xl px-4 py-3 border-2 ${
-                currentEntry.size === 'small' ? 'border-green-200 bg-green-50' : 'border-slate-200 bg-slate-50'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-slate-800">
-                    Sized as {SIZE_LABEL[currentEntry.size]}
-                    {currentEntry.size === 'small' && <span className="text-green-600"> — driver fee free</span>}
-                  </span>
-                  <span className="text-lg">{currentEntry.icon}</span>
-                </div>
-                <p className="text-xs text-slate-500 mt-1">{currentEntry.loadNote}</p>
-              </div>
-            )}
-            {currentItem.item_type && !currentEntry?.size && (
+            {/* Size -- adjustable for EVERY item, within the item's guardrails:
+                never below its floor (a fridge is never Small), always
+                upgradable (a massive desk can be Large or X-Large). */}
+            {currentItem.item_type && (
               <div>
                 <label className="label">How big is it? *</label>
+                {currentEntry?.loadNote && <p className="text-xs text-slate-500 mb-2">{currentEntry.loadNote}</p>}
                 <div className="grid grid-cols-2 gap-2">
-                  {OTHER_SIZES.map(s => (
+                  {SIZE_OPTIONS.filter(s => currentAllowed.includes(s.key)).map(s => (
                     <button key={s.key} type="button"
                       onClick={() => setCurrentItem({ item_size: s.key })}
                       className={`border-2 rounded-xl py-3 px-2 text-center transition-all ${
@@ -420,11 +410,19 @@ export default function PostJobPage() {
                           ? 'border-orange-500 bg-orange-50'
                           : 'border-slate-200 hover:border-orange-300 bg-white'
                       }`}>
-                      <div className="font-bold text-sm text-slate-800">{s.name}</div>
+                      <div className="font-bold text-sm text-slate-800">
+                        {s.name}
+                        {currentEntry?.size === s.key && <span className="ml-1 text-[10px] font-semibold text-orange-500">(typical)</span>}
+                      </div>
                       <div className="text-xs text-slate-500 mt-0.5">{s.desc}</div>
                     </button>
                   ))}
                 </div>
+                {currentAllowed[0] !== 'small' && (
+                  <p className="text-xs text-slate-400 mt-1.5">
+                    ⚖️ Minimum for this item: <strong>{SIZE_LABEL[currentAllowed[0]]}</strong> — pick a bigger size if yours is unusually large or heavy.
+                  </p>
+                )}
               </div>
             )}
 
@@ -446,7 +444,7 @@ export default function PostJobPage() {
 
             {/* Honesty / re-rate disclaimer */}
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5 text-xs text-amber-800">
-              ⚖️ <strong>Sizes are set by the item, not by you.</strong> When the driver arrives and sees the item in person, they can adjust the size and price to match what's actually there — based on what they see at pickup, not your photo. Describing a bigger item as something smaller will simply be corrected on the spot.
+              ⚖️ <strong>Be accurate with the size.</strong> When the driver arrives and sees the item in person, they can adjust the size and price to match what's actually there — based on what they see at pickup, not your photo. Describing a bigger item as something smaller will simply be corrected on the spot.
             </div>
 
             {/* Photo -- REQUIRED (drivers judge the load from it before accepting) */}
