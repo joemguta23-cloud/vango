@@ -25,37 +25,65 @@ export async function POST(req: NextRequest) {
 
     const { data: job } = await supabase
       .from('jobs')
-      .select('id, driver_id, buyer_id, driver_fee, discount_code_id')
+      .select('id, status, driver_id, buyer_id, driver_fee, discount_code_id')
       .eq('id', jobId)
       .single()
 
     if (job) {
-      // Update job with payment intent ID
-      await supabase.from('jobs').update({ stripe_payment_intent_id: pi.id }).eq('id', jobId)
+      // PAYMENT HARD-STOP: this successful payment is what makes the job
+      // visible to drivers. Flip 'unpaid' (or an 'expired' one the buyer paid
+      // for anyway) to 'pending' with a fresh 24h visibility window.
+      const activating = job.status === 'unpaid' || job.status === 'expired'
+      if (activating) {
+        await supabase.from('jobs').update({
+          status: 'pending',
+          service_fee_paid: true,
+          created_at: new Date().toISOString(),
+          stripe_payment_intent_id: pi.id,
+        }).eq('id', jobId)
+        await supabase.from('job_status_events').insert({
+          job_id: jobId,
+          status: 'pending',
+          note: 'Service fee paid — job is live, finding driver',
+        })
+      } else {
+        await supabase.from('jobs').update({
+          service_fee_paid: true,
+          stripe_payment_intent_id: pi.id,
+        }).eq('id', jobId)
+      }
+
       await supabase.from('job_status_events').insert({
         job_id: jobId,
         status: 'payment_confirmed',
         note: `Payment of $${(pi.amount / 100).toFixed(2)} confirmed`,
       })
 
-      // Feature-flagged cancellation policy: this payment included any
-      // outstanding $2 cancellation fees (see create-checkout-session/route.ts)
-      // -- mark those cancelled jobs as charged now that payment succeeded.
+      // Cancellation policy: this payment included any outstanding km-based
+      // cancellation fees (see create-checkout-session/route.ts) -- mark
+      // those cancelled jobs as charged now that payment succeeded.
       const owedJobIds = (pi.metadata?.owed_job_ids || '').split(',').filter(Boolean)
       if (owedJobIds.length) {
         await supabase.from('jobs').update({ cancellation_fee_charged: true }).in('id', owedJobIds)
       }
 
-      // Feature-flagged discount codes: count this use now that payment
-      // (or the no-charge full-waiver path) has actually gone through.
+      // Promo codes are CONSUMED here, when payment actually succeeds (a $0
+      // full-waiver activation consumes in create-checkout-session instead).
+      // Single-use codes deactivate the moment they hit their cap; cancelling
+      // the job later restores them (see app/api/jobs/cancel/route.ts).
       if (job.discount_code_id) {
         const { data: dc } = await supabase
           .from('discount_codes')
-          .select('uses_count')
+          .select('id, uses_count, max_uses, active')
           .eq('id', job.discount_code_id)
           .single()
         if (dc) {
-          await supabase.from('discount_codes').update({ uses_count: dc.uses_count + 1 }).eq('id', job.discount_code_id)
+          const newCount = (dc.uses_count ?? 0) + 1
+          const exhausted = dc.max_uses != null && newCount >= dc.max_uses
+          await supabase.from('discount_codes').update({
+            uses_count: newCount,
+            active: exhausted ? false : dc.active,
+          }).eq('id', dc.id)
         }
       }
 
@@ -72,7 +100,7 @@ export async function POST(req: NextRequest) {
         await notifyUser(supabase, {
           userId: job.buyer_id,
           title: '✅ Payment confirmed',
-          body: `Your payment of $${(pi.amount / 100).toFixed(2)} was received. Job is on its way!`,
+          body: `Your payment of $${(pi.amount / 100).toFixed(2)} was received. Your job is now live and we're finding a driver!`,
           url: `/buyer/tracking/${jobId}`,
         })
       }
