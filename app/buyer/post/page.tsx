@@ -239,6 +239,10 @@ export default function PostJobPage() {
     const combinedNote = [helperNote.trim(), accessNotes.trim() ? `Access: ${accessNotes.trim()}` : '']
       .filter(Boolean).join(' — ') || null
 
+    // PAYMENT HARD-STOP: the job is created as 'unpaid' and is NOT visible to
+    // drivers. It only goes live once the service fee is paid via Stripe
+    // Checkout (webhook flips it to 'pending'), or immediately if a promo
+    // code fully waives the fee (the $0 path in create-checkout-session).
     const { data: job, error: jobErr } = await supabase.from('jobs').insert({
       buyer_id: user.id,
       items: hydratedItems,
@@ -270,7 +274,7 @@ export default function PostJobPage() {
       extra_stops_fee: price.extraStopsFee,
       distance_zone: distanceZone,
       scheduled_for: schedule === 'scheduled' ? scheduledFor : null,
-      status: 'pending',
+      status: 'unpaid',
       driver_fee: price.driverFee,
       service_fee: price.serviceFee,
       // Promo / discount code (feature-flagged; null unless DISCOUNT_CODES_ENABLED)
@@ -280,12 +284,13 @@ export default function PostJobPage() {
     if (jobErr) { setError(jobErr.message); setLoading(false); return }
 
     await supabase.from('job_status_events').insert({
-      job_id: job.id, status: 'pending', note: 'Job posted -- finding driver',
+      job_id: job.id, status: 'unpaid', note: 'Job created -- awaiting service fee payment',
     })
 
     // Charge the Vanute service fee via Stripe Checkout (card / Apple Pay / Google Pay).
-    // The driver's fee stays cash / PayID on delivery. If Checkout can't be created for any
-    // reason, don't strand the buyer -- the job is already posted, so fall through to tracking.
+    // The driver's fee stays cash / PayID on delivery. If Checkout can't be created for
+    // any reason the job simply stays 'unpaid' (invisible to drivers) and the tracking
+    // page shows a "Pay service fee" button to finish activation.
     try {
       const res = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
@@ -737,7 +742,7 @@ export default function PostJobPage() {
                   </div>
                 </div>
                 <p className="text-xs text-orange-600 mt-3">
-                  Pay <strong>${money(price.driverFee)} by cash or PayID</strong> to the driver on delivery. The ${money(discountedServiceFee)} service fee is charged to your card when you post.
+                  Pay <strong>${money(price.driverFee)} by cash or PayID</strong> to the driver on delivery. The ${money(discountedServiceFee)} service fee is charged to your card when you post — <strong>your job only goes live to drivers once it's paid</strong>.
                 </p>
               </div>
             )}
