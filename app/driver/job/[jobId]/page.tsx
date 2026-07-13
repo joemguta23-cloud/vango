@@ -48,6 +48,11 @@ export default function DriverJobPage() {
   const [proofFile, setProofFile] = useState<File | null>(null)
   const [proofPreview, setProofPreview] = useState<string | null>(null)
 
+  // Delivery note (optional) -- extra context posted with the final delivery
+  // photo, e.g. "left at the front of the house" or "no one home, left in
+  // the driveway". Shown to the customer on their tracking page.
+  const [deliveryNote, setDeliveryNote] = useState('')
+
   // Driver price re-rate at pickup (item bigger than described)
   const [showAdjust, setShowAdjust] = useState(false)
   const [adjusting, setAdjusting] = useState(false)
@@ -125,7 +130,13 @@ export default function DriverJobPage() {
     // total job time for the data-driven pricing analytics (see PRICING policy).
     const patch: any = { status: next.status }
     if (next.status === 'picked_up') { patch.picked_up_at = new Date().toISOString(); patch.pickup_photo_url = proofUrl }
-    if (next.status === 'delivered') { patch.delivered_at = new Date().toISOString(); patch.dropoff_photo_url = proofUrl }
+    if (next.status === 'delivered') {
+      patch.delivered_at = new Date().toISOString()
+      patch.dropoff_photo_url = proofUrl
+      // Save the driver's delivery note with the final photo so the customer
+      // sees exactly where/how their item was left.
+      patch.delivery_note = deliveryNote.trim() || null
+    }
     const { error: updErr } = await supabase.from('jobs').update(patch).eq('id', jobId)
     if (updErr) {
       alert('Could not update the job — please try again.')
@@ -133,7 +144,11 @@ export default function DriverJobPage() {
       return
     }
     await supabase.from('job_status_events').insert({
-      job_id: jobId, status: next.status, note: next.note,
+      job_id: jobId,
+      status: next.status,
+      note: next.status === 'delivered' && deliveryNote.trim()
+        ? `${next.note} — Driver note: ${deliveryNote.trim()}`
+        : next.note,
     })
     setProofFile(null)
     setProofPreview(null)
@@ -385,6 +400,24 @@ export default function DriverJobPage() {
                 <img src={proofPreview} alt="Proof" className="w-full h-full object-cover" />
                 <button onClick={() => { setProofFile(null); setProofPreview(null) }}
                   className="absolute top-2 right-2 w-7 h-7 bg-black/50 text-white rounded-full flex items-center justify-center text-sm">×</button>
+              </div>
+            )}
+
+            {/* Delivery note -- shown ONLY on the final (delivery) step, right
+                under the delivery photo. Lets the driver add context like
+                "left at the front of the house" or "no one home — left in the
+                driveway". Saved with the job and shown to the customer. */}
+            {job.status === 'picked_up' && (
+              <div className="mt-3">
+                <div className="font-bold text-sm text-slate-700 mb-1">🗒️ Delivery note <span className="font-normal text-slate-400">(optional, recommended)</span></div>
+                <textarea
+                  className="input resize-none w-full"
+                  rows={2}
+                  placeholder='e.g. "Handed to the customer" or "No one home — left in the driveway by the garage"'
+                  value={deliveryNote}
+                  onChange={e => setDeliveryNote(e.target.value)}
+                />
+                <p className="text-xs text-slate-400 mt-1">This note is saved with your delivery photo and shown to the customer.</p>
               </div>
             )}
           </div>
