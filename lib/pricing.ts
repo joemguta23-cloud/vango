@@ -13,18 +13,20 @@
  * A per-driver fuel surcharge for the driver->pickup leg is added when matched.
  * service_fee (card, platform revenue) = $11.99 flat.
  *
- * SIZING IS NOW CATALOGUE-DRIVEN (anti-gaming). Every known item type has a
- * FIXED price size in ITEM_CATALOG below, chosen by how long it takes to
- * load, how many hands it needs, and whether it needs a trolley:
- *   - A fridge is ALWAYS Large: trolley, two people, kept upright.
- *   - A ladder/mattress/TV is big but light and quick to slide on: Medium.
- *   - Piano / pool table / spa are specialist two-plus-person jobs: X-Large.
- * Customers no longer pick a size for known items -- the catalogue assigns it,
- * so "fridge marked as small" is impossible. Only "Other" lets the customer
- * choose, and the driver can re-rate any item at pickup when they see it.
- * Small / very-small items (boxes, bags, small appliances) are NOT charged a
- * driver fee at all -- but the whole job is still floored at MIN_DRIVER_FEE so
- * a driver is never asked to do a pickup for $0.
+ * SIZING: CATALOGUE-DRIVEN WITH FLEXIBILITY + GUARDRAILS.
+ * Every known item type has a DEFAULT price size (`size`) and a MINIMUM
+ * (`minSize`) it can never price below. The customer can adjust the size for
+ * any item — up (a genuinely massive desk can be Large or X-Large) or down —
+ * but never below the item's floor:
+ *   - A fridge is never Small: even a bar fridge still needs careful upright
+ *     handling, so its floor is Medium (default Large).
+ *   - Specialist items (piano, pool table, spa) floor at Large.
+ *   - Light items (desk, TV, mattress...) floor at Medium — they never ride
+ *     in the free Small tier, but can be upgraded when unusually big.
+ *   - Only genuine small-category items (boxes & bags, small appliances) and
+ *     "Other" can be Small.
+ * The driver can still re-rate UP at pickup when the real item is bigger
+ * than described — that remains the ultimate anti-gaming guardrail.
  */
 import type { ItemSize } from '@/types'
 
@@ -51,11 +53,12 @@ export const MIN_DRIVER_FEE = 15
 export const EXTRA_ITEM_FEE = 10
 
 // ---------------------------------------------------------------------------
-// ITEM CATALOGUE -- the anti-gaming pricing table.
+// ITEM CATALOGUE -- the pricing table with per-item guardrails.
 //
-// `size` is the FIXED price tier for that item type (a floor the customer
-// cannot go below; the driver can still re-rate UP at pickup). `size: null`
-// means the customer chooses ("Other").
+// `size`    is the DEFAULT price tier for that item type.
+// `minSize` is the FLOOR the customer can never go below (anti-gaming); they
+//           may pick any size from minSize up to X-Large. `size: null` means
+//           the customer chooses freely ("Other").
 //
 // `effort` drives the helper prompts and driver expectations:
 //   easy       -- one person, quick slide-on (ladder, mattress, TV)
@@ -74,76 +77,81 @@ export interface CatalogEntry {
   name: string          // stored in jobs.item_type
   label: string         // shown on the picker tile
   icon: string
-  size: ItemSize | null // fixed price tier; null = customer selects (Other)
+  size: ItemSize | null // DEFAULT price tier; null = customer selects (Other)
+  minSize: ItemSize     // FLOOR — the customer can never price below this
   effort: LoadEffort
   loadNote: string      // why it's priced this way (shown to customer + driver)
 }
 
 export const ITEM_CATALOG: CatalogEntry[] = [
-  // -- Large ($85 base): heavy / high loading time, 2 people, often a trolley --
-  { name: 'Fridge', label: 'Fridge', icon: '🧊', size: 'large', effort: 'two_person',
-    loadNote: 'Heavy — needs a trolley, two people and careful upright handling.' },
-  { name: 'Washer/Dryer', label: 'Washer / Dryer', icon: '🌀', size: 'large', effort: 'two_person',
+  // -- Large ($85 default, floor Medium): heavy / high loading time --
+  { name: 'Fridge', label: 'Fridge', icon: '🧊', size: 'large', minSize: 'medium', effort: 'two_person',
+    loadNote: 'Heavy — needs a trolley, two people and careful upright handling. A small bar fridge can be set to Medium, but a fridge is never Small.' },
+  { name: 'Washer/Dryer', label: 'Washer / Dryer', icon: '🌀', size: 'large', minSize: 'medium', effort: 'two_person',
     loadNote: 'Heavy — needs a trolley and two people to load safely.' },
-  { name: 'Couch', label: 'Couch / Sofa', icon: '🛋️', size: 'large', effort: 'two_person',
-    loadNote: 'Bulky and heavy — two people to carry and load.' },
-  { name: 'Wardrobe', label: 'Wardrobe', icon: '🚪', size: 'large', effort: 'two_person',
+  { name: 'Couch', label: 'Couch / Sofa', icon: '🛋️', size: 'large', minSize: 'medium', effort: 'two_person',
+    loadNote: 'Bulky and heavy — two people to carry and load. A compact 2-seater can be Medium.' },
+  { name: 'Wardrobe', label: 'Wardrobe', icon: '🚪', size: 'large', minSize: 'medium', effort: 'two_person',
     loadNote: 'Tall and heavy — two people, handled with care.' },
-  { name: 'Drawers/Dresser', label: 'Drawers / Dresser', icon: '🗄️', size: 'large', effort: 'two_person',
+  { name: 'Drawers/Dresser', label: 'Drawers / Dresser', icon: '🗄️', size: 'large', minSize: 'medium', effort: 'two_person',
     loadNote: 'Solid and heavy — two people to lift and load.' },
-  { name: 'Dining Table', label: 'Dining Table', icon: '🍽️', size: 'large', effort: 'two_person',
+  { name: 'Dining Table', label: 'Dining Table', icon: '🍽️', size: 'large', minSize: 'medium', effort: 'two_person',
     loadNote: 'Big and awkward — two people to carry and load.' },
-  { name: 'Gym Equipment', label: 'Gym / Treadmill', icon: '🏋️', size: 'large', effort: 'two_person',
+  { name: 'Gym Equipment', label: 'Gym / Treadmill', icon: '🏋️', size: 'large', minSize: 'medium', effort: 'two_person',
     loadNote: 'Dense and awkward — two people and slow careful loading.' },
-  { name: 'Materials', label: 'Building Materials', icon: '🧱', size: 'large', effort: 'two_person',
+  { name: 'Materials', label: 'Building Materials', icon: '🧱', size: 'large', minSize: 'medium', effort: 'two_person',
     loadNote: 'Heavy loads — takes real time and muscle to load.' },
-  { name: 'Outdoor Setting', label: 'Outdoor Setting', icon: '⛱️', size: 'large', effort: 'two_person',
+  { name: 'Outdoor Setting', label: 'Outdoor Setting', icon: '⛱️', size: 'large', minSize: 'medium', effort: 'two_person',
     loadNote: 'Multiple heavy pieces — two people to load.' },
 
-  // -- X-Large ($130 base): specialist multi-person jobs --
-  { name: 'Piano', label: 'Piano', icon: '🎹', size: 'xlarge', effort: 'specialist',
+  // -- X-Large ($130 default, floor Large): specialist multi-person jobs --
+  { name: 'Piano', label: 'Piano', icon: '🎹', size: 'xlarge', minSize: 'large', effort: 'specialist',
     loadNote: 'Specialist move — very heavy, multiple people, careful handling.' },
-  { name: 'Pool Table', label: 'Pool Table', icon: '🎱', size: 'xlarge', effort: 'specialist',
+  { name: 'Pool Table', label: 'Pool Table', icon: '🎱', size: 'xlarge', minSize: 'large', effort: 'specialist',
     loadNote: 'Specialist move — extremely heavy, multiple people.' },
-  { name: 'Spa', label: 'Spa / Hot Tub', icon: '🛁', size: 'xlarge', effort: 'specialist',
+  { name: 'Spa', label: 'Spa / Hot Tub', icon: '🛁', size: 'xlarge', minSize: 'large', effort: 'specialist',
     loadNote: 'Specialist move — very large and heavy, multiple people.' },
 
-  // -- Medium ($55 base): big but light / quick one-person load --
-  { name: 'Mattress', label: 'Mattress', icon: '🛏️', size: 'medium', effort: 'easy',
-    loadNote: 'Big but light — slides straight on.' },
-  { name: 'Bed Frame', label: 'Bed Frame', icon: '🛌', size: 'medium', effort: 'easy',
+  // -- Medium ($55 default, floor Medium): big but light / quick loads.
+  //    Upgradable to Large/X-Large when unusually big or heavy (a massive
+  //    executive desk, a king mattress, a huge trampoline...). Never Small —
+  //    the free tier is only for genuine small items. --
+  { name: 'Mattress', label: 'Mattress', icon: '🛏️', size: 'medium', minSize: 'medium', effort: 'easy',
+    loadNote: 'Big but light — slides straight on. Upgrade the size for a heavy king ensemble.' },
+  { name: 'Bed Frame', label: 'Bed Frame', icon: '🛌', size: 'medium', minSize: 'medium', effort: 'easy',
     loadNote: 'Light when disassembled — quick to load.' },
-  { name: 'TV', label: 'TV', icon: '📺', size: 'medium', effort: 'easy',
+  { name: 'TV', label: 'TV', icon: '📺', size: 'medium', minSize: 'medium', effort: 'easy',
     loadNote: 'Light — carried by one person with care.' },
-  { name: 'Desk', label: 'Desk / Small Table', icon: '🖥️', size: 'medium', effort: 'easy',
-    loadNote: 'Light — quick one-person load.' },
-  { name: 'Bookshelf', label: 'Bookshelf', icon: '📚', size: 'medium', effort: 'easy',
+  { name: 'Desk', label: 'Desk / Small Table', icon: '🖥️', size: 'medium', minSize: 'medium', effort: 'easy',
+    loadNote: 'Light — quick one-person load. A big or heavy desk? Set it to Large.' },
+  { name: 'Bookshelf', label: 'Bookshelf', icon: '📚', size: 'medium', minSize: 'medium', effort: 'easy',
     loadNote: 'Light when empty — quick to load.' },
-  { name: 'Chairs', label: 'Chairs', icon: '🪑', size: 'medium', effort: 'easy',
+  { name: 'Chairs', label: 'Chairs', icon: '🪑', size: 'medium', minSize: 'medium', effort: 'easy',
     loadNote: 'Light — quick to stack and load.' },
-  { name: 'BBQ', label: 'BBQ', icon: '🍖', size: 'medium', effort: 'easy',
+  { name: 'BBQ', label: 'BBQ', icon: '🍖', size: 'medium', minSize: 'medium', effort: 'easy',
     loadNote: 'Rolls on its wheels — quick to load.' },
-  { name: 'Ladder', label: 'Ladder', icon: '🪜', size: 'medium', effort: 'easy',
+  { name: 'Ladder', label: 'Ladder', icon: '🪜', size: 'medium', minSize: 'medium', effort: 'easy',
     loadNote: 'Long but light — slides straight on.' },
-  { name: 'Bike', label: 'Bike', icon: '🚲', size: 'medium', effort: 'easy',
+  { name: 'Bike', label: 'Bike', icon: '🚲', size: 'medium', minSize: 'medium', effort: 'easy',
     loadNote: 'Light — lifts straight on.' },
-  { name: 'Rug/Mirror', label: 'Rug / Mirror', icon: '🖼️', size: 'medium', effort: 'easy',
+  { name: 'Rug/Mirror', label: 'Rug / Mirror', icon: '🖼️', size: 'medium', minSize: 'medium', effort: 'easy',
     loadNote: 'Light — handled with care, quick to load.' },
-  { name: 'Tools', label: 'Tools', icon: '🧰', size: 'medium', effort: 'easy',
+  { name: 'Tools', label: 'Tools', icon: '🧰', size: 'medium', minSize: 'medium', effort: 'easy',
     loadNote: 'Compact — quick to load.' },
-  { name: 'Garden', label: 'Garden / Plants', icon: '🌿', size: 'medium', effort: 'easy',
+  { name: 'Garden', label: 'Garden / Plants', icon: '🌿', size: 'medium', minSize: 'medium', effort: 'easy',
     loadNote: 'Light — quick to load.' },
-  { name: 'Trampoline', label: 'Trampoline', icon: '🤸', size: 'medium', effort: 'easy',
+  { name: 'Trampoline', label: 'Trampoline', icon: '🤸', size: 'medium', minSize: 'medium', effort: 'easy',
     loadNote: 'Light when disassembled — quick to load.' },
 
-  // -- Small (free driver fee): only the service fee applies --
-  { name: 'Boxes & Bags', label: 'Boxes & Bags', icon: '📦', size: 'small', effort: 'easy',
-    loadNote: 'Small items ride free — you only pay the service fee.' },
-  { name: 'Small Appliance', label: 'Small Appliance', icon: '🔌', size: 'small', effort: 'easy',
+  // -- Small (free driver fee) — genuine small items only. Can be upgraded
+  //    when it is actually a big load (a ute-load of boxes is not Small). --
+  { name: 'Boxes & Bags', label: 'Boxes & Bags', icon: '📦', size: 'small', minSize: 'small', effort: 'easy',
+    loadNote: 'Small items ride free — you only pay the service fee. A full ute-load of boxes? Set a bigger size.' },
+  { name: 'Small Appliance', label: 'Small Appliance', icon: '🔌', size: 'small', minSize: 'small', effort: 'easy',
     loadNote: 'Microwave, toaster etc — rides free, only the service fee applies.' },
 
   // -- Other: customer selects a size; description is mandatory; driver re-rates --
-  { name: 'Other', label: 'Other', icon: '❓', size: null, effort: 'easy',
+  { name: 'Other', label: 'Other', icon: '❓', size: null, minSize: 'small', effort: 'easy',
     loadNote: 'Describe it clearly — the driver confirms the size at pickup.' },
 ]
 
@@ -162,19 +170,27 @@ export const HEAVY_LOAD_TYPES = ['Fridge', 'Washer/Dryer', 'Couch', 'Wardrobe', 
 const SIZE_ORDER: ItemSize[] = ['small', 'medium', 'large', 'xlarge']
 
 /**
- * The size we actually PRICE an item at. The catalogue size is a FLOOR:
- * a fridge can never be priced below Large no matter what the client sends.
- * A customer can still go bigger (e.g. an unusually huge item of a known
- * type), and the driver can re-rate upward at pickup.
+ * The sizes a customer is ALLOWED to pick for an item type: everything from
+ * the item's floor (minSize) up to X-Large. Drives the size selector in the
+ * post/edit forms.
+ */
+export function allowedSizes(itemType: string): ItemSize[] {
+  const entry = catalogEntry(itemType)
+  const floor = entry?.minSize ?? LEGACY_SIZE[itemType] ?? 'small'
+  return SIZE_ORDER.slice(SIZE_ORDER.indexOf(floor))
+}
+
+/**
+ * The size we actually PRICE an item at. The item's minSize is a hard FLOOR:
+ * a fridge can never be priced below Medium no matter what the client sends,
+ * and no light item can sneak into the free Small tier. Within the allowed
+ * range the customer's choice is honoured, and the driver can still re-rate
+ * upward at pickup.
  */
 export function effectiveSize(itemType: string, size: ItemSize): ItemSize {
   const entry = catalogEntry(itemType)
-  const floor = entry?.size ?? LEGACY_SIZE[itemType] ?? null
+  const floor = entry?.minSize ?? LEGACY_SIZE[itemType] ?? null
   if (floor && SIZE_ORDER.indexOf(size) < SIZE_ORDER.indexOf(floor)) return floor
-  // No floor (e.g. "Other"), or the chosen/re-rated size is at/above the
-  // floor: honour it as-is. (The old "large-but-light -> medium" downgrade is
-  // gone -- the catalogue now assigns light-but-large items to Medium
-  // directly, so a customer-chosen Large on "Other" genuinely means heavy.)
   return size
 }
 
