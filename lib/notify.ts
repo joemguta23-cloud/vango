@@ -27,7 +27,7 @@ export async function sendEmail(to: string, subject: string, html: string) {
   await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: 'VanGo <jobs@vango.com.au>', to, subject, html }),
+    body: JSON.stringify({ from: 'Vanute <no-reply@vanute.com.au>', to, subject, html }),
   })
 }
 
@@ -35,7 +35,7 @@ export async function sendEmail(to: string, subject: string, html: string) {
 export async function sendPush(subscriptions: { endpoint: string; p256dh: string; auth: string }[], payload: { title: string; body: string; url?: string }) {
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) return
   // Initialise lazily inside the function — not at module level
-  webpush.setVapidDetails('mailto:hello@vango.com.au', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY)
+  webpush.setVapidDetails('mailto:hello@vanute.com.au', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY)
   for (const sub of subscriptions) {
     try {
       await webpush.sendNotification(
@@ -61,7 +61,7 @@ export async function notifyUser(supabase: any, { userId, title, body, url }: No
 
   const { data: authUser } = await supabase.auth.admin.getUserById(userId)
   if (authUser?.user?.email) {
-    await sendEmail(authUser.user.email, title, `<p>${body}</p><p><a href="${fullUrl}">View on VanGo →</a></p>`)
+    await sendEmail(authUser.user.email, title, `<p>${body}</p><p><a href="${fullUrl}">View on Vanute →</a></p>`)
   }
 
   if (subs?.length) await sendPush(subs, { title, body, url: fullUrl })
