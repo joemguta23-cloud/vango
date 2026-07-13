@@ -4,14 +4,17 @@ import { useParams } from 'next/navigation'
 import Nav from '@/components/Nav'
 import MessageThread from '@/components/MessageThread'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
-import { FEATURE_FLAGS } from '@/lib/featureFlags'
+import { FEATURE_FLAGS, CANCELLATION_FEE_CENTS } from '@/lib/featureFlags'
+import { haversineKm, distanceFeeForKm } from '@/lib/pricing'
 
 const STATUS_LABELS = {
+  unpaid: { label: 'Awaiting payment', icon: '💳', msg: 'Your job is saved but NOT visible to drivers yet. Pay the service fee below to make it live.' },
   pending: { label: 'Finding driver', icon: '🔍', msg: "We're matching you with the nearest available driver..." },
   accepted: { label: 'Driver on the way', icon: '🚐', msg: 'Your driver has accepted and is heading to the seller.' },
   picked_up: { label: 'Item collected', icon: '📦', msg: 'Your item has been picked up and is on its way to you.' },
   delivered: { label: 'Delivered!', icon: '✅', msg: '🎉 Your item has been delivered. Please pay the driver the agreed amount by cash or PayID.' },
   cancelled: { label: 'Cancelled', icon: '❌', msg: 'This job was cancelled.' },
+  expired: { label: 'Removed', icon: '⏳', msg: 'This job was removed after 24 hours. You can repost it from My Jobs.' },
 }
 const STATUS_ORDER = ['pending', 'accepted', 'picked_up', 'delivered']
 
@@ -20,10 +23,11 @@ const STATUS_ORDER = ['pending', 'accepted', 'picked_up', 'delivered']
 // pin even if a stale lat/lng is still in the row, for privacy.
 const LIVE_TRACKING_STATUSES = ['accepted', 'picked_up']
 
-// Statuses from which a buyer can still cancel (feature-flagged, see
-// lib/featureFlags.ts). Free before a driver accepts; a $2 fee applies
-// once a driver has already accepted.
-const CANCELLABLE_STATUSES = ['pending', 'accepted']
+// Statuses from which a buyer can still cancel. Free while no driver has
+// accepted (unpaid / pending); once a driver has accepted, the fee equals
+// this trip's distance charge (km-based driver reimbursement, floored at $2).
+// Cancelling is no longer possible once the item has been picked up.
+const CANCELLABLE_STATUSES = ['unpaid', 'pending', 'accepted']
 
 // Clean money display: never show floating-point junk like 21.990000000000002.
 const money = (n) => {
@@ -80,6 +84,7 @@ export default function TrackingPage() {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+  const [paying, setPaying] = useState(false)
   const [showMessages, setShowMessages] = useState(false)
 
   // Fetch the job as separate, resilient queries instead of one fragile
@@ -164,11 +169,41 @@ export default function TrackingPage() {
     }
   }
 
+  // PAYMENT HARD-STOP: an 'unpaid' job is invisible to drivers until the
+  // service fee is paid. This creates a fresh Stripe Checkout session for it.
+  const payServiceFee = async () => {
+    setPaying(true)
+    try {
+      const res = await fetch('/api/stripe/create-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      })
+      const data = await res.json()
+      if (res.ok && data.url) { window.location.href = data.url; return }
+      alert(data.error || 'Could not start the payment — please try again.')
+    } catch {
+      alert('Could not start the payment — check your connection and try again.')
+    }
+    setPaying(false)
+  }
+
+  // After-acceptance cancellation fee preview: this trip's distance charge
+  // (km-based driver reimbursement), floored at $2 — must mirror
+  // app/api/jobs/cancel/route.ts.
+  const cancelFee = (() => {
+    if (!job) return CANCELLATION_FEE_CENTS / 100
+    const coords = [job.pickup_lat, job.pickup_lng, job.dropoff_lat, job.dropoff_lng]
+    if (!coords.every(v => Number.isFinite(Number(v)))) return CANCELLATION_FEE_CENTS / 100
+    const km = haversineKm(Number(job.pickup_lat), Number(job.pickup_lng), Number(job.dropoff_lat), Number(job.dropoff_lng))
+    return Math.max(CANCELLATION_FEE_CENTS / 100, distanceFeeForKm(km))
+  })()
+
   const handleCancel = async () => {
     if (!job) return
-    const afterAccept = job.status !== 'pending'
+    const afterAccept = job.status === 'accepted'
     const warning = afterAccept
-      ? 'Cancel this job? Since a driver has already accepted, a $2 fee will be added to your next completed job.'
+      ? `Cancel this job? Since a driver has already accepted, a $${money(cancelFee)} cancellation fee (this trip's distance charge, reimbursing the driver for their time) will be added to your next job's checkout.`
       : 'Cancel this job? This is free since no driver has accepted yet.'
     if (!confirm(warning)) return
     setCancelling(true)
@@ -221,7 +256,7 @@ export default function TrackingPage() {
           <a href="/buyer/post" className="text-sm font-semibold text-orange-500 hover:text-orange-600">+ Post another</a>
         </div>
 
-        <div className={`rounded-2xl p-6 text-center mb-6 ${job.status === 'delivered' ? 'bg-green-50 border border-green-200' : job.status === 'cancelled' ? 'bg-red-50 border border-red-200' : 'bg-orange-50 border border-orange-200'}`}>
+        <div className={`rounded-2xl p-6 text-center mb-6 ${job.status === 'delivered' ? 'bg-green-50 border border-green-200' : job.status === 'cancelled' || job.status === 'expired' ? 'bg-red-50 border border-red-200' : job.status === 'unpaid' ? 'bg-purple-50 border border-purple-200' : 'bg-orange-50 border border-orange-200'}`}>
           <div className="text-5xl mb-3">{statusInfo.icon}</div>
           <h1 className="text-xl font-black text-slate-800 mb-1">{statusInfo.label}</h1>
           <p className="text-slate-600 text-sm">{statusInfo.msg}</p>
@@ -231,6 +266,14 @@ export default function TrackingPage() {
             </div>
           )}
         </div>
+
+        {/* PAYMENT HARD-STOP: pay button for unpaid jobs */}
+        {job.status === 'unpaid' && (
+          <button onClick={payServiceFee} disabled={paying}
+            className="block w-full text-center bg-orange-500 text-white font-bold py-3.5 rounded-xl mb-6 hover:bg-orange-600 transition-colors disabled:opacity-60">
+            {paying ? 'Opening secure payment…' : `💳 Pay service fee ($${money(job.service_fee)}) — make my job live`}
+          </button>
+        )}
 
         {job.status === 'delivered' && !alreadyRated && (
           <a href={`/buyer/rate/${jobId}`}
@@ -322,6 +365,11 @@ export default function TrackingPage() {
                 </div>
               )}
             </div>
+            {job.delivery_note && (
+              <div className="mt-3 bg-blue-50 border border-blue-200 rounded-xl px-3.5 py-2.5 text-sm text-blue-900">
+                🗒️ <strong>Driver's delivery note:</strong> {job.delivery_note}
+              </div>
+            )}
           </div>
         )}
 
@@ -333,7 +381,7 @@ export default function TrackingPage() {
               { label: 'Pickup', value: job.pickup_address },
               { label: 'Dropoff', value: job.dropoff_address },
               { label: 'Driver fee', value: `${money(job.driver_fee)} — cash or PayID on delivery` },
-              { label: 'Service fee', value: `${money(job.service_fee)}` },
+              { label: 'Service fee', value: `${money(job.service_fee)}${job.status === 'unpaid' ? ' — unpaid' : ''}` },
             ].map(r => (
               <div key={r.label} className="flex justify-between py-1.5 border-b border-slate-100 last:border-0">
                 <span className="text-slate-500">{r.label}</span>
@@ -346,7 +394,7 @@ export default function TrackingPage() {
         {canCancel && (
           <button onClick={handleCancel} disabled={cancelling}
             className="w-full text-center text-red-600 font-semibold text-sm py-2.5 mb-4 rounded-xl border border-red-200 hover:bg-red-50 transition-colors">
-            {cancelling ? 'Cancelling...' : job.status === 'pending' ? 'Cancel job (free)' : 'Cancel job ($2 fee applies)'}
+            {cancelling ? 'Cancelling...' : job.status === 'accepted' ? `Cancel job ($${money(cancelFee)} fee — reimburses the driver)` : 'Cancel job (free)'}
           </button>
         )}
 
