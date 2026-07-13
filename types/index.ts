@@ -85,6 +85,27 @@ export interface Job {
   cancellation_fee_charged: boolean
   // Discount / promo code applied at posting time (feature-flagged).
   discount_code_id: string | null
+  // ── Buyer job editing (Uber-style) ─────────────────────────────────────────
+  // While a driver is assigned, buyer edits are stored here as a pending
+  // CHANGE REQUEST until the driver accepts or declines (see
+  // app/api/jobs/edit and app/api/jobs/respond-change). NULL when no request
+  // is outstanding. `fields` is the full replacement column set; `summary`
+  // is the human-readable old → new diff shown to the driver.
+  pending_changes?: { fields: Record<string, any>; summary: string[]; requested_at: string } | null
+  change_requested_at?: string | null
+  change_reminded_at?: string | null
+  // ── Columns that exist in the DB and are read by various pages ─────────────
+  accepted_at?: string | null
+  picked_up_at?: string | null
+  delivered_at?: string | null
+  service_fee_paid?: boolean
+  delivery_note?: string | null
+  original_driver_fee?: number | null
+  pickup_photo_url?: string | null
+  dropoff_photo_url?: string | null
+  rating?: number | null
+  cancellation_stage?: string | null
+  cancellation_fee?: number | null
   created_at: string
   updated_at: string
   driver?: Driver
