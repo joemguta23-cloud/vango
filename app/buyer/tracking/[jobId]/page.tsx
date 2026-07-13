@@ -29,6 +29,13 @@ const LIVE_TRACKING_STATUSES = ['accepted', 'picked_up']
 // Cancelling is no longer possible once the item has been picked up.
 const CANCELLABLE_STATUSES = ['unpaid', 'pending', 'accepted']
 
+// Statuses during which the buyer can still EDIT the job (wrong suburb,
+// change of location, different item...). While no driver has accepted the
+// edit applies instantly with a live reprice; once a driver has accepted,
+// the edit becomes a change REQUEST the driver must approve (Uber-style,
+// see /buyer/edit/[jobId]). No edits once the item is picked up.
+const EDITABLE_STATUSES = ['unpaid', 'pending', 'accepted']
+
 // Clean money display: never show floating-point junk like 21.990000000000002.
 const money = (n) => {
   const v = Math.round(Number(n) * 100) / 100
@@ -243,6 +250,8 @@ export default function TrackingPage() {
   const statusIndex = STATUS_ORDER.indexOf(job.status)
   const showDriverLocation = LIVE_TRACKING_STATUSES.includes(job.status) && job.driver?.current_lat != null && job.driver?.current_lng != null
   const canCancel = FEATURE_FLAGS.CANCELLATION_ENABLED && CANCELLABLE_STATUSES.includes(job.status)
+  const canEdit = EDITABLE_STATUSES.includes(job.status)
+  const changesAwaitingDriver = !!job.pending_changes && job.status === 'accepted'
   const alreadyRated = job.rating != null
   const hasProofPhotos = !!(job.pickup_photo_url || job.dropoff_photo_url)
   const priceAdjusted = job.original_driver_fee != null && Number(job.original_driver_fee) !== Number(job.driver_fee)
@@ -266,6 +275,19 @@ export default function TrackingPage() {
             </div>
           )}
         </div>
+
+        {/* Changes sent to the driver — awaiting their approval (Uber-style) */}
+        {changesAwaitingDriver && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 mb-4">
+            <div className="font-bold mb-1">⏳ Changes sent to your driver — waiting for their OK</div>
+            {Array.isArray(job.pending_changes?.summary) && job.pending_changes.summary.length > 0 && (
+              <ul className="list-disc ml-4 space-y-0.5 text-xs">
+                {job.pending_changes.summary.map((s, i) => <li key={i}>{s}</li>)}
+              </ul>
+            )}
+            <p className="text-xs mt-2">Your driver has been notified urgently and keeps getting reminders until they respond. If the new details don't suit them they can opt out penalty-free — your job then automatically goes back out live to other drivers with your new details, at no fee to you.</p>
+          </div>
+        )}
 
         {/* PAYMENT HARD-STOP: pay button for unpaid jobs */}
         {job.status === 'unpaid' && (
@@ -390,6 +412,16 @@ export default function TrackingPage() {
             ))}
           </div>
         </div>
+
+        {/* Edit the job — wrong suburb, new location, different item/size.
+            Free-form before a driver accepts; a driver-approved change
+            request afterwards (Uber-style). */}
+        {canEdit && (
+          <a href={`/buyer/edit/${jobId}`}
+            className="block w-full text-center font-semibold text-sm py-2.5 mb-3 rounded-xl border border-orange-200 text-orange-600 hover:bg-orange-50 transition-colors">
+            ✏️ Edit job details{job.status === 'accepted' ? ' (your driver approves the changes)' : ' (updates instantly)'}
+          </a>
+        )}
 
         {canCancel && (
           <button onClick={handleCancel} disabled={cancelling}
