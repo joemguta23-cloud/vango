@@ -3,7 +3,7 @@ import { stripe, SERVICE_FEE_CENTS } from '@/lib/stripe'
 import { createSupabaseAdminClient } from '@/lib/supabase'
 import { FEATURE_FLAGS, CANCELLATION_FEE_CENTS } from '@/lib/featureFlags'
 
-// Creates a Stripe Checkout Session for the VanGo service fee.
+// Creates a Stripe Checkout Session for the Vanute service fee.
 // Card, Apple Pay and Google Pay are surfaced automatically based on what
 // is enabled in the Stripe Dashboard payment method settings -- we deliberately
 // do not hardcode payment_method_types so new wallets can be turned on later
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
     }
 
     const totalCents = feeCents + cancellationFeeCents
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://getvango.com.au'
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://www.vanute.com.au'
 
     // Nothing to charge (e.g. a full-waiver promo code and no outstanding
     // cancellation fees) -- skip Stripe entirely rather than create a
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
         price_data: {
           currency: 'aud',
           product_data: {
-            name: 'VanGo service fee',
+            name: 'Vanute service fee',
             description: 'Booking & matching fee -- driver fee is paid cash / PayID on delivery',
           },
           unit_amount: feeCents,
