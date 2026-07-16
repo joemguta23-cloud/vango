@@ -37,7 +37,7 @@ export default function RateJobPage() {
       <div className="max-w-md mx-auto px-4 pt-28 text-center">
         <div className="text-5xl mb-4">🙏</div>
         <h1 className="text-2xl font-black">Thanks for your feedback!</h1>
-        <p className="text-slate-500 mt-2">It helps keep VanGo drivers great.</p>
+        <p className="text-slate-500 mt-2">It helps keep Vanute drivers great.</p>
       </div>
     </div>
   )
@@ -47,7 +47,7 @@ export default function RateJobPage() {
       <Nav />
       <div className="max-w-md mx-auto px-4 pt-24 pb-12">
         <h1 className="text-2xl font-black mb-1">Rate your delivery</h1>
-        <p className="text-slate-500 text-sm mb-6">How was your VanGo experience? A comment is optional.</p>
+        <p className="text-slate-500 text-sm mb-6">How was your Vanute experience? A comment is optional.</p>
 
         <div className="flex justify-center gap-2 mb-6">
           {[1, 2, 3, 4, 5].map(n => (
