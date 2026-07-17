@@ -36,7 +36,7 @@ export async function startDriverPresence(driverId: string): Promise<void> {
 
   watcherId = await BackgroundGeolocation.addWatcher(
     {
-      backgroundTitle: 'VanGo — Online',
+      backgroundTitle: 'Vanute — Online',
       backgroundMessage: 'Keeping you online so you receive nearby jobs.',
       requestPermissions: true,
       stale: false,
