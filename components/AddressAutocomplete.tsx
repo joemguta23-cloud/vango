@@ -21,13 +21,13 @@ function loadGoogleMaps(): Promise<void> {
   mapsLoadPromise = new Promise((resolve, reject) => {
     const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
     if (!key) { reject(new Error('Missing NEXT_PUBLIC_GOOGLE_MAPS_API_KEY')); return }
-    w.__vangoMapsLoaded = () => resolve()
+    w.__vanuteMapsLoaded = () => resolve()
     // If Google rejects the key at runtime (e.g. a referrer/quota problem) it
     // calls gm_authFailure -- treat that as "no autocomplete" and fall back to
     // a plain input instead of leaving Google's error overlay in the way.
     w.gm_authFailure = () => reject(new Error('Google Maps auth failure (check key referrers)'))
     const script = document.createElement('script')
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async&callback=__vangoMapsLoaded`
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async&callback=__vanuteMapsLoaded`
     script.async = true
     script.onerror = () => reject(new Error('Failed to load Google Maps script'))
     document.head.appendChild(script)
@@ -95,7 +95,7 @@ export default function AddressAutocomplete({ placeholder, value, onChange }: Ad
 
   return (
     <div>
-      <div ref={containerRef} className="vango-places-input" />
+      <div ref={containerRef} className="vanute-places-input" />
       {!ready && (
         <input className="input" placeholder={placeholder} value={value}
           onChange={e => onChange(e.target.value, null, null)} />

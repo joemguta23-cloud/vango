@@ -9,11 +9,11 @@ import type { CapacitorConfig } from '@capacitor/cli'
  * (drivers stay Online with the app closed) and native push notifications.
  */
 const config: CapacitorConfig = {
-  appId: 'au.com.getvango.app',
+  appId: 'au.com.vanute.app',
   appName: 'Vanute',
   webDir: 'public',
   server: {
-    url: 'https://getvango.com.au',
+    url: 'https://www.vanute.com.au',
     cleartext: false,
   },
   plugins: {

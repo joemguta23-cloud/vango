@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   title: 'Delete Your Account',
   description:
     'How to delete your Vanute account and associated personal data, what is removed, and what may be kept to meet legal obligations.',
-  alternates: { canonical: 'https://getvango.com.au/account-deletion' },
+  alternates: { canonical: 'https://vanute.com.au/account-deletion' },
 }
 
 export default function AccountDeletionPage() {
@@ -25,7 +25,7 @@ export default function AccountDeletionPage() {
         <h2 className="text-xl font-bold text-slate-800 mt-8 mb-2">How to request account deletion</h2>
         <p className="text-slate-600 leading-relaxed mb-4">
           To delete your Vanute account and associated personal data, email us at{' '}
-          <a href="mailto:getvango@gmail.com" className="text-orange-500 font-semibold hover:underline">getvango@gmail.com</a>{' '}
+          <a href="mailto:admin@vanute.com.au" className="text-orange-500 font-semibold hover:underline">admin@vanute.com.au</a>{' '}
           from the email address registered to your account, with the subject line &ldquo;Delete my account&rdquo;.
           We&rsquo;ll verify that the request is from you and permanently delete your account within 30 days. You can
           also review and update your account details at any time in the app under <strong>Settings</strong>.
@@ -51,7 +51,7 @@ export default function AccountDeletionPage() {
         <h2 className="text-xl font-bold text-slate-800 mt-8 mb-2">Questions</h2>
         <p className="text-slate-600 leading-relaxed mb-4">
           If you need help deleting your account, email us at{' '}
-          <a href="mailto:getvango@gmail.com" className="text-orange-500 font-semibold hover:underline">getvango@gmail.com</a>.
+          <a href="mailto:admin@vanute.com.au" className="text-orange-500 font-semibold hover:underline">admin@vanute.com.au</a>.
         </p>
       </div>
     </div>

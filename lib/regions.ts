@@ -1,5 +1,5 @@
-// Australian states & territories VanGo can operate in.
-// Only regions with `enabled: true` are currently serviceable. As VanGo
+// Australian states & territories Vanute can operate in.
+// Only regions with `enabled: true` are currently serviceable. As Vanute
 // expands, flip a region's `enabled` to true — the whole app reads from
 // here, so the signup selector (and any future region gating) updates
 // automatically.

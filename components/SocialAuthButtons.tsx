@@ -42,7 +42,7 @@ export default function SocialAuthButtons({ role }: { role?: string }) {
   const signIn = async (provider: Provider) => {
     setBusy(provider)
     setError('')
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://getvango.com.au'
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://www.vanute.com.au'
     const redirectTo = `${origin}/auth/callback${role ? `?role=${encodeURIComponent(role)}` : ''}`
     const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo } })
     // On success the browser is redirected to the provider; on failure we stay.

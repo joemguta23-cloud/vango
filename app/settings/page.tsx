@@ -15,7 +15,7 @@ import { createSupabaseBrowserClient } from '@/lib/supabase'
 // even their own via the table). We therefore read the user's own phone from
 // their auth metadata, and keep BOTH the metadata and the profiles column in
 // sync on save (the profiles column stays the server-side source of truth
-// for VanGo internal use, e.g. future masked calling).
+// for Vanute internal use, e.g. future masked calling).
 const VEHICLE_TYPES = ['ute', 'van', 'truck']
 
 export default function SettingsPage() {

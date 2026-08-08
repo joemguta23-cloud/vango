@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   title: 'Large Item Delivery Melbourne — FAQ',
   description:
     'Answers about Vanute large item and furniture delivery in Melbourne & Victoria — costs, what we carry, Facebook Marketplace & Gumtree pickups, payment, and becoming a driver.',
-  alternates: { canonical: 'https://getvango.com.au/faq' },
+  alternates: { canonical: 'https://vanute.com.au/faq' },
 }
 
 const FAQS = [

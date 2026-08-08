@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   title: 'Privacy Policy',
   description:
     'How Vanute collects, uses and protects your information, including driver location data used to match and track deliveries across Melbourne and Victoria.',
-  alternates: { canonical: 'https://getvango.com.au/privacy' },
+  alternates: { canonical: 'https://vanute.com.au/privacy' },
 }
 
 export default function PrivacyPage() {
@@ -84,7 +84,7 @@ export default function PrivacyPage() {
         <h2 className="text-xl font-bold text-slate-800 mt-8 mb-2">Contact us</h2>
         <p className="text-slate-600 leading-relaxed mb-4">
           Questions about this policy or your data? Email us at{' '}
-          <a href="mailto:getvango@gmail.com" className="text-orange-500 font-semibold hover:underline">getvango@gmail.com</a>.
+          <a href="mailto:admin@vanute.com.au" className="text-orange-500 font-semibold hover:underline">admin@vanute.com.au</a>.
         </p>
       </div>
     </div>

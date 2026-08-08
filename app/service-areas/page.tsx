@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   title: 'Delivery Service Areas — Melbourne & Victoria',
   description:
     'Vanute provides large item and furniture delivery across Melbourne and Victoria — inner city, northern, western, eastern, southern and bayside suburbs. See the areas our ute and van drivers cover.',
-  alternates: { canonical: 'https://getvango.com.au/service-areas' },
+  alternates: { canonical: 'https://vanute.com.au/service-areas' },
 }
 
 const AREAS = [

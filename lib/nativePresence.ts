@@ -2,9 +2,9 @@
  * Driver presence — native background location.
  *
  * This module is what makes a driver "stay Online like Uber". In the native
- * VanGo app (iOS/Android via Capacitor) it streams the driver's location to
+ * Vanute app (iOS/Android via Capacitor) it streams the driver's location to
  * Supabase even when the app is backgrounded or the phone is locked, and keeps
- * a persistent "VanGo — Online" notification so the OS won't suspend it.
+ * a persistent "Vanute — Online" notification so the OS won't suspend it.
  *
  * On the plain website every function is a safe no-op — nothing about the web
  * experience changes. All Capacitor imports are dynamic so they are never

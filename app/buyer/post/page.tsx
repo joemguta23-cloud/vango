@@ -655,7 +655,7 @@ export default function PostJobPage() {
                   fixed price, so posting is blocked in favour of a custom quote. */}
               {price.quoteRequired && (
                 <div className="mt-2 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5 text-xs text-amber-800">
-                  🚚 <strong>Long-distance job (over 150 km).</strong> This is beyond our standard instant-quote range, so we can't guarantee an auto driver match at a fixed price. Please <a href="mailto:admin@getvango.com.au?subject=Long-distance%20delivery%20quote" className="underline font-semibold">contact us for a custom quote</a> and we'll arrange a driver for you.
+                  🚚 <strong>Long-distance job (over 150 km).</strong> This is beyond our standard instant-quote range, so we can't guarantee an auto driver match at a fixed price. Please <a href="mailto:admin@vanute.com.au?subject=Long-distance%20delivery%20quote" className="underline font-semibold">contact us for a custom quote</a> and we'll arrange a driver for you.
                 </div>
               )}
             </div>

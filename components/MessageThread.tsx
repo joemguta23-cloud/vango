@@ -6,7 +6,7 @@ import { createSupabaseBrowserClient } from '@/lib/supabase'
 // tracking page and the driver active-job page open this in a modal.
 // Access control is enforced by the job_messages RLS policies -- only the
 // job's buyer or assigned driver can read/send. Includes Block + Report
-// for user safety (records to chat_safety_actions for VanGo review).
+// for user safety (records to chat_safety_actions for Vanute review).
 //
 // Latency design (feels instant, no manual refresh needed):
 //  - Sending appends the message to the local list immediately (optimistic),
