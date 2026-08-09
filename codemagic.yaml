@@ -36,7 +36,8 @@ workflows:
       node: 22
       groups:
         - android_signing      # CM_KEYSTORE (base64), CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS, CM_KEY_PASSWORD
-        - google_play          # optional: GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        # - google_play        # re-add ONLY after creating this group (GCLOUD_SERVICE_ACCOUNT_CREDENTIALS).
+                               # Codemagic fails the build if a referenced group does not exist.
       vars:
         PACKAGE_NAME: "au.com.vanute"
     scripts:
