@@ -1,0 +1,114 @@
+# Vanute — native app build pipelines (Codemagic)
+#
+# The app is a Capacitor shell that loads https://www.vanute.com.au, plus the two
+# things a browser cannot do: background location (drivers stay Online with the app
+# closed) and native push notifications. Because the UI is served from the live site,
+# most releases need no new binary — only native changes do.
+#
+# Bundle ID / applicationId is au.com.vanute on BOTH platforms. It matches the Apple
+# App ID that Sign in with Apple is attached to, and it is PERMANENT once published.
+#
+# Before the first run, add in Codemagic:
+#   android-play  -> code signing identity (keystore) with reference name  vango_keystore
+#                    [optional] GCLOUD_SERVICE_ACCOUNT_CREDENTIALS in group google_play
+#   ios-appstore  -> App Store Connect API key integration named  vanute_asc_key
+
+definitions:
+  scripts:
+    - &npm_install
+      name: Install dependencies
+      script: npm ci || npm install
+    - &cap_sync
+      name: Capacitor sync
+      script: npx cap sync
+
+workflows:
+  android-play:
+    name: Android — Play Store (.aab)
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      java: 17
+      node: 20
+      android_signing:
+        - vango_keystore
+      groups:
+        - google_play          # optional: GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+      vars:
+        PACKAGE_NAME: "au.com.vanute"
+    scripts:
+      - *npm_install
+      - *cap_sync
+      - name: Set version from build number
+        script: |
+          cd android
+          echo "Build number: $PROJECT_BUILD_NUMBER"
+      - name: Build signed AAB
+        script: |
+          cd android
+          ./gradlew bundleRelease \
+            -PversionCode=$(($PROJECT_BUILD_NUMBER + 1)) \
+            -PversionName="1.0.$PROJECT_BUILD_NUMBER"
+    artifacts:
+      - android/app/build/outputs/**/*.aab
+      - android/app/build/outputs/**/mapping.txt
+    publishing:
+      email:
+        recipients:
+          - joemguta23@gmail.com
+        notify:
+          success: true
+          failure: true
+      # Uncomment once GCLOUD_SERVICE_ACCOUNT_CREDENTIALS is set, to auto-upload:
+      # google_play:
+      #   credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+      #   track: internal
+      #   submit_as_draft: true
+
+  ios-appstore:
+    name: iOS — TestFlight / App Store
+    max_build_duration: 90
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: vanute_asc_key
+    environment:
+      node: 20
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: au.com.vanute
+      vars:
+        BUNDLE_ID: "au.com.vanute"
+        APP_STORE_APPLE_ID: 6799637897
+    scripts:
+      - *npm_install
+      - *cap_sync
+      - name: Install CocoaPods dependencies
+        script: |
+          if [ -f ios/App/Podfile ]; then cd ios/App && pod install; fi
+      - name: Set up code signing
+        script: xcode-project use-profiles
+      - name: Increment build number
+        script: |
+          cd ios/App
+          agvtool new-version -all $(($(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID") + 1))
+      - name: Build ipa
+        script: |
+          xcode-project build-ipa \
+            --project "ios/App/App.xcodeproj" \
+            --scheme "App"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      email:
+        recipients:
+          - joemguta23@gmail.com
+        notify:
+          success: true
+          failure: true
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: false

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Vanute</string>
+    <string name="title_activity_main">Vanute</string>
+    <string name="package_name">au.com.vanute</string>
+    <string name="custom_url_scheme">au.com.vanute</string>
+</resources>
