@@ -16,7 +16,7 @@ const FAQS = [
   },
   {
     q: 'How much does large item delivery cost in Melbourne?',
-    a: 'The driver fee depends on item size and distance — typically from around $55 for a medium item up to $130+ for extra-large items, plus a small distance surcharge. Vanute adds a flat $12 service fee. You pay the driver in cash on delivery and the $12 by card when you post the job.',
+    a: 'The driver fee depends on item size and distance — typically around $60 for a medium item like a mattress or desk, around $90 for a large item like a fridge or couch, and $130+ for extra-large items such as a piano or spa, plus 30c/km on longer runs. Vanute adds a flat $11.99 service fee. You pay the driver by cash or PayID on delivery, and the $11.99 by card when you post the job.',
   },
   {
     q: 'Can Vanute deliver a Facebook Marketplace or Gumtree purchase?',
@@ -32,7 +32,7 @@ const FAQS = [
   },
   {
     q: 'How do I pay for my delivery?',
-    a: 'You pay the driver fee in cash directly to the driver on delivery. Vanute’s flat $12 service fee is charged to your card (Apple Pay and Google Pay supported) at the moment you post the job.',
+    a: 'You pay the driver fee directly to the driver by cash or PayID when your item is delivered. Vanute’s flat $11.99 service fee is charged to your card (Apple Pay and Google Pay supported) at the moment you post the job — your job only goes live to drivers once that is paid.',
   },
   {
     q: 'How fast can I get something delivered in Melbourne?',
@@ -40,7 +40,7 @@ const FAQS = [
   },
   {
     q: 'How do I become a Vanute driver in Melbourne?',
-    a: 'If you have a ute or van, sign up as a driver, add your vehicle and licence details, and start accepting delivery jobs near you. You set your own hours and get paid cash on every delivery. There is no sign-up fee.',
+    a: 'If you have a ute or van, sign up as a driver, add your vehicle and licence details, and start accepting delivery jobs near you. You set your own hours and are paid by cash or PayID on every delivery — and you keep 100% of the driver fee, because Vanute takes nothing out of it. There is no sign-up fee.',
   },
 ]
 
