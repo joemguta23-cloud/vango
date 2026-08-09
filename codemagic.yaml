@@ -72,10 +72,10 @@ workflows:
           ./gradlew bundleRelease \
             -PversionCode=$(($PROJECT_BUILD_NUMBER + 1)) \
             -PversionName="1.0.$PROJECT_BUILD_NUMBER" \
-            -Pandroid.injected.signing.store.file=/tmp/vanute-upload.jks \
-            -Pandroid.injected.signing.store.password="$CM_KEYSTORE_PASSWORD" \
-            -Pandroid.injected.signing.key.alias="$CM_KEY_ALIAS" \
-            -Pandroid.injected.signing.key.password="$CM_KEY_PASSWORD"
+            -PVANUTE_STORE_FILE=/tmp/vanute-upload.jks \
+            -PVANUTE_STORE_PASSWORD="$CM_KEYSTORE_PASSWORD" \
+            -PVANUTE_KEY_ALIAS="$CM_KEY_ALIAS" \
+            -PVANUTE_KEY_PASSWORD="$CM_KEY_PASSWORD"
     artifacts:
       - android/app/build/outputs/**/*.aab
       - android/app/build/outputs/**/mapping.txt
