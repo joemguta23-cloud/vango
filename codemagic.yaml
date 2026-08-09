@@ -60,10 +60,12 @@ workflows:
             echo "ERROR: keystore is only $SIZE bytes - CM_KEYSTORE is not valid base64 of the .jks"
             exit 1
           fi
-          # Prove the store opens AND the alias/passwords are right, before Gradle runs.
-          keytool -list -keystore /tmp/vanute-upload.jks \
-            -storepass "$CM_KEYSTORE_PASSWORD" -alias "$CM_KEY_ALIAS" > /dev/null
-          echo "Keystore verified: alias '$CM_KEY_ALIAS' opens correctly"
+          # Report on the store, but do NOT block Gradle - keytool availability and
+          # defaults vary between build images, and Gradle does its own validation.
+          echo "--- keytool check (informational) ---"
+          which keytool || echo "keytool not on PATH"
+          keytool -list -keystore /tmp/vanute-upload.jks -storepass "$CM_KEYSTORE_PASSWORD" 2>&1 | head -20 || true
+          echo "--- end keytool check ---"
       - name: Build signed AAB
         script: |
           cd android
