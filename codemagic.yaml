@@ -51,9 +51,6 @@ workflows:
           printf '%s' "$CM_KEYSTORE" | tr -d '\n\r ' > /tmp/ks.b64
           base64 --decode /tmp/ks.b64 > /tmp/vanute-upload.jks 2>/dev/null \
             || base64 -D -i /tmp/ks.b64 -o /tmp/vanute-upload.jks
-          # Diagnostic: lengths only, never the values themselves.
-          echo "len(CM_KEYSTORE)=${#CM_KEYSTORE} len(CM_KEYSTORE_PASSWORD)=${#CM_KEYSTORE_PASSWORD} len(CM_KEY_PASSWORD)=${#CM_KEY_PASSWORD} len(CM_KEY_ALIAS)=${#CM_KEY_ALIAS}"
-          echo "alias value is: [$CM_KEY_ALIAS]"
           SIZE=$(wc -c < /tmp/vanute-upload.jks | tr -d ' ')
           echo "Keystore decoded: $SIZE bytes"
           if [ "$SIZE" -lt 1000 ]; then
@@ -62,15 +59,6 @@ workflows:
           fi
           # Report on the store, but do NOT block Gradle - keytool availability and
           # defaults vary between build images, and Gradle does its own validation.
-          echo "sha256 of decoded keystore (expect e713d64c115a1413d57083b64d793b22f3aeba57076888900897a25b4465d752):"
-          shasum -a 256 /tmp/vanute-upload.jks || sha256sum /tmp/vanute-upload.jks
-          echo "first bytes (expect 3082):"
-          head -c 4 /tmp/vanute-upload.jks | xxd | head -1
-          echo "--- keytool check (informational) ---"
-          keytool -list -keystore /tmp/vanute-upload.jks -storetype PKCS12 -storepass "$CM_KEYSTORE_PASSWORD" 2>&1 | head -10 || true
-          which keytool || echo "keytool not on PATH"
-          keytool -list -keystore /tmp/vanute-upload.jks -storepass "$CM_KEYSTORE_PASSWORD" 2>&1 | head -20 || true
-          echo "--- end keytool check ---"
       - name: Build signed AAB
         script: |
           cd android
