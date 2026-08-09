@@ -9,7 +9,11 @@
 # App ID that Sign in with Apple is attached to, and it is PERMANENT once published.
 #
 # Before the first run, add in Codemagic:
-#   android-play  -> code signing identity (keystore) with reference name  vango_keystore
+#   android-play  -> env var group "android_signing" containing:
+#                      CM_KEYSTORE           (.jks base64-encoded, mark Secure)
+#                      CM_KEYSTORE_PASSWORD  (Secure)
+#                      CM_KEY_ALIAS          (vanute-upload)
+#                      CM_KEY_PASSWORD       (Secure)
 #                    [optional] GCLOUD_SERVICE_ACCOUNT_CREDENTIALS in group google_play
 #   ios-appstore  -> App Store Connect API key integration named  vanute_asc_key
 
@@ -30,25 +34,28 @@ workflows:
     environment:
       java: 17
       node: 20
-      android_signing:
-        - vango_keystore
       groups:
+        - android_signing      # CM_KEYSTORE (base64), CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS, CM_KEY_PASSWORD
         - google_play          # optional: GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
       vars:
         PACKAGE_NAME: "au.com.vanute"
     scripts:
       - *npm_install
       - *cap_sync
-      - name: Set version from build number
+      - name: Decode signing keystore
         script: |
-          cd android
-          echo "Build number: $PROJECT_BUILD_NUMBER"
+          echo "$CM_KEYSTORE" | base64 --decode > /tmp/vanute-upload.jks
+          echo "Keystore written: $(stat -c%s /tmp/vanute-upload.jks) bytes"
       - name: Build signed AAB
         script: |
           cd android
           ./gradlew bundleRelease \
             -PversionCode=$(($PROJECT_BUILD_NUMBER + 1)) \
-            -PversionName="1.0.$PROJECT_BUILD_NUMBER"
+            -PversionName="1.0.$PROJECT_BUILD_NUMBER" \
+            -Pandroid.injected.signing.store.file=/tmp/vanute-upload.jks \
+            -Pandroid.injected.signing.store.password="$CM_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$CM_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$CM_KEY_PASSWORD"
     artifacts:
       - android/app/build/outputs/**/*.aab
       - android/app/build/outputs/**/mapping.txt
