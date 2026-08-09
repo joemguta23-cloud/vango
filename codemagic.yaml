@@ -43,10 +43,24 @@ workflows:
     scripts:
       - *npm_install
       - *cap_sync
-      - name: Decode signing keystore
+      - name: Decode and verify signing keystore
         script: |
-          echo "$CM_KEYSTORE" | base64 --decode > /tmp/vanute-upload.jks
-          echo "Keystore written: $(stat -c%s /tmp/vanute-upload.jks) bytes"
+          set -e
+          # macOS build machines ship BSD base64 (-D); Linux uses GNU (--decode).
+          # Strip any stray newlines the env-var UI may have introduced.
+          printf '%s' "$CM_KEYSTORE" | tr -d '\n\r ' > /tmp/ks.b64
+          base64 --decode /tmp/ks.b64 > /tmp/vanute-upload.jks 2>/dev/null \
+            || base64 -D -i /tmp/ks.b64 -o /tmp/vanute-upload.jks
+          SIZE=$(wc -c < /tmp/vanute-upload.jks | tr -d ' ')
+          echo "Keystore decoded: $SIZE bytes"
+          if [ "$SIZE" -lt 1000 ]; then
+            echo "ERROR: keystore is only $SIZE bytes - CM_KEYSTORE is not valid base64 of the .jks"
+            exit 1
+          fi
+          # Prove the store opens AND the alias/passwords are right, before Gradle runs.
+          keytool -list -keystore /tmp/vanute-upload.jks \
+            -storepass "$CM_KEYSTORE_PASSWORD" -alias "$CM_KEY_ALIAS" > /dev/null
+          echo "Keystore verified: alias '$CM_KEY_ALIAS' opens correctly"
       - name: Build signed AAB
         script: |
           cd android
