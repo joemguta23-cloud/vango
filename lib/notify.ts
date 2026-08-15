@@ -52,9 +52,10 @@ export async function sendPush(
 
 // -- Native push (iOS/Android) via Firebase Cloud Messaging v1 -----------------
 //
-// Web push does NOT work inside the iOS app (WKWebView has no service worker
-// push), so the native app relies on this path. lib/push.ts stores each
-// driver's device token on drivers.push_token when they go Online.
+// This is the Uber-style banner: it appears over whatever the driver is doing
+// (YouTube, Netflix, locked screen). Web push does NOT work inside the iOS app
+// (WKWebView has no service-worker push), so the native app relies on this path.
+// lib/push.ts stores the device token on drivers.push_token when they go Online.
 //
 // Requires two env vars:
 //   FCM_PROJECT_ID            - Firebase project id
@@ -124,9 +125,7 @@ export async function sendNativePush(
             token,
             notification: { title: payload.title, body: payload.body },
             data: payload.url ? { url: payload.url } : undefined,
-            apns: {
-              payload: { aps: { sound: 'default', badge: 1 } },
-            },
+            apns: { payload: { aps: { sound: 'default', badge: 1 } } },
             android: {
               priority: 'HIGH',
               notification: { sound: 'default', channel_id: 'vanute_jobs' },
@@ -140,34 +139,50 @@ export async function sendNativePush(
   }
 }
 
-// -- Notify a user across every available channel ------------------------------
+// -- Notify a user across every channel they have left switched on -------------
+//
+// Drivers control each channel independently from /driver/notifications.
+// All three default to TRUE, so a driver who never touches settings gets
+// everything. Only an explicit false opts them out. Customers have no driver
+// row, so they always receive everything (there is nothing to opt out of yet).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function notifyUser(supabase: any, { userId, title, body, url }: NotifyPayload) {
   const [{ data: profile }, { data: subs }, { data: driver }] = await Promise.all([
     supabase.from('profiles').select('phone').eq('id', userId).single(),
     supabase.from('push_subscriptions').select('*').eq('user_id', userId),
-    supabase.from('drivers').select('push_token, push_enabled').eq('user_id', userId).maybeSingle(),
+    supabase
+      .from('drivers')
+      .select('push_token, push_enabled, sms_enabled, email_enabled')
+      .eq('user_id', userId)
+      .maybeSingle(),
   ])
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || ''
   const fullUrl = url ? baseUrl + url : baseUrl
 
-  // Native app push first - this is the one drivers actually feel on their phone.
-  // push_enabled defaults to true; only an explicit false opts out.
-  if (driver?.push_token && driver.push_enabled !== false) {
+  const pushAllowed = !driver || driver.push_enabled !== false
+  const smsAllowed = !driver || driver.sms_enabled !== false
+  const emailAllowed = !driver || driver.email_enabled !== false
+
+  // Banner push first - this is the one the driver actually feels on their phone.
+  if (driver?.push_token && pushAllowed) {
     await sendNativePush([driver.push_token], { title, body, url: fullUrl })
   }
 
-  if (profile?.phone) await sendSMS(profile.phone, title + ': ' + body)
-
-  const { data: authUser } = await supabase.auth.admin.getUserById(userId)
-  if (authUser?.user?.email) {
-    await sendEmail(
-      authUser.user.email,
-      title,
-      '<p>' + body + '</p><p><a href="' + fullUrl + '">View on Vanute &rarr;</a></p>'
-    )
+  if (smsAllowed && profile?.phone) {
+    await sendSMS(profile.phone, title + ': ' + body)
   }
 
-  if (subs?.length) await sendPush(subs, { title, body, url: fullUrl })
+  if (emailAllowed) {
+    const { data: authUser } = await supabase.auth.admin.getUserById(userId)
+    if (authUser?.user?.email) {
+      await sendEmail(
+        authUser.user.email,
+        title,
+        '<p>' + body + '</p><p><a href="' + fullUrl + '">View on Vanute &rarr;</a></p>'
+      )
+    }
+  }
+
+  if (pushAllowed && subs?.length) await sendPush(subs, { title, body, url: fullUrl })
 }
