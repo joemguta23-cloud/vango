@@ -64,7 +64,7 @@ export const viewport: Viewport = {
 const JSON_LD = {
   '@context': 'https://schema.org',
   '@type': 'LocalBusiness',
-  '@id': \`\${SITE_URL}/#business\`,
+  '@id': SITE_URL + '/#business',
   name: 'Vanute',
   alternateName: ['Get Vanute', 'GetVanute', 'Get Van Ute', 'Van Ute', 'Vanute Melbourne'],
   legalName: 'Two Minute Van Pty Ltd',
