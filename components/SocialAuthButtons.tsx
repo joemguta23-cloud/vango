@@ -58,29 +58,27 @@ export default function SocialAuthButtons({ role }: { role?: string }) {
       provider,
       options: { redirectTo, skipBrowserRedirect: true },
     })
-    if (error) {
-      setError(oauthErrorMessage(error.message))
-      setBusy(null)
-      return
+    if (error) throw new Error(error.message)
+    if (!data?.url) throw new Error('Could not start sign-in. Please try again.')
+
+    // The in-app browser plugin itself is a separate potential failure point
+    // from the Supabase call above (missing/broken native module, the
+    // provider window failing to present, etc). Isolate it so the outer
+    // catch always gets a specific, useful message instead of a generic one.
+    let Browser: typeof import('@capacitor/browser').Browser
+    try {
+      ;({ Browser } = await import('@capacitor/browser'))
+    } catch {
+      throw new Error('Sign-in browser is unavailable on this device. Please try email sign-in instead.')
     }
-    if (!data?.url) {
-      setError('Could not start sign-in. Please try again.')
-      setBusy(null)
-      return
-    }
-    const { Browser } = await import('@capacitor/browser')
+
     // If the user closes the in-app browser without finishing, re-enable the
     // button instead of leaving it stuck on "Redirecting…" forever.
     const handle = await Browser.addListener('browserFinished', () => {
       setBusy(null)
       void handle.remove()
     })
-    // Safety net: OAuthDeepLink.tsx normally clears this by navigating the
-    // page away once the vanute://auth/callback deep link comes back and the
-    // browser is closed. If that handoff ever fails for an unrelated reason
-    // (network hiccup, an OS quirk), this stops the button being stuck on
-    // "Redirecting…" forever -- the person can just try again.
-    setTimeout(() => setBusy(prev => (prev === provider ? null : prev)), 45000)
+
     await Browser.open({ url: data.url })
   }
 
@@ -89,26 +87,43 @@ export default function SocialAuthButtons({ role }: { role?: string }) {
     const redirectTo = `${origin}/auth/callback${role ? `?role=${encodeURIComponent(role)}` : ''}`
     const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo } })
     // On success the browser is redirected to the provider; on failure we stay.
-    if (error) {
-      setError(oauthErrorMessage(error.message))
-      setBusy(null)
-    }
+    if (error) throw new Error(error.message)
   }
 
   const signIn = async (provider: Provider) => {
     setBusy(provider)
     setError('')
 
-    let isNative = false
-    try {
-      const { Capacitor } = await import('@capacitor/core')
-      isNative = Capacitor.isNativePlatform()
-    } catch {
-      isNative = false // plain web build - @capacitor/core isn't resolvable
-    }
+    // Safety net covering EVERY failure mode below, not just the ones we
+    // anticipated: if signInNative/signInWeb throws anything at all -- a
+    // plugin call that silently never resolves, a network stall, anything --
+    // this guarantees the button releases itself instead of staying stuck on
+    // "Redirecting…" forever with no way to retry. This must be scheduled
+    // BEFORE any other async work starts, so it fires even if the very first
+    // await (e.g. importing a Capacitor plugin) never returns.
+    const safetyTimer = setTimeout(() => {
+      setBusy(prev => (prev === provider ? null : prev))
+      setError(prev => prev || 'Sign-in is taking too long. Please try again.')
+    }, 20000)
 
-    if (isNative) await signInNative(provider)
-    else await signInWeb(provider)
+    try {
+      let isNative = false
+      try {
+        const { Capacitor } = await import('@capacitor/core')
+        isNative = Capacitor.isNativePlatform()
+      } catch {
+        isNative = false // plain web build - @capacitor/core isn't resolvable
+      }
+
+      if (isNative) await signInNative(provider)
+      else await signInWeb(provider)
+
+      clearTimeout(safetyTimer)
+    } catch (err: any) {
+      clearTimeout(safetyTimer)
+      setError(oauthErrorMessage(err?.message || 'Could not start sign-in. Please try again.'))
+      setBusy(null)
+    }
   }
 
   return (
