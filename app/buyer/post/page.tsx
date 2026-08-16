@@ -107,8 +107,26 @@ export default function PostJobPage() {
 
   // Picking an item type sets its DEFAULT size; the customer can then adjust
   // within the allowed range (floor..X-Large) below.
+  //
+  // Shopping-cart behaviour: once the item currently being edited already has
+  // a type AND some other detail filled in (description/photo), tapping a
+  // different item type ADDS it as a NEW cart item instead of overwriting the
+  // one in progress. Previously tapping "Couch" right after "Fridge" just
+  // replaced the fridge -- there was no way to build up a second or third
+  // item from the grid itself, only via the separate "+ Add another item"
+  // button. A bare, just-tapped type with nothing else filled in still gets
+  // corrected in place, so a wrong first tap is easy to fix.
   const pickItemType = (name: string) => {
     const entry = catalogEntry(name)
+    const inProgress = !!currentItem.item_type && (
+      currentItem.description.trim() || currentItem._photoFile || currentItem.photo_url
+    )
+    if (inProgress) {
+      setItems(prev => [...prev, { ...blankItem(), item_type: name, item_size: entry?.size ?? 'medium' }])
+      setEditingItem(items.length)
+      setTriedContinue(false)
+      return
+    }
     setCurrentItem({ item_type: name, item_size: entry?.size ?? 'medium' })
   }
 
@@ -360,9 +378,14 @@ export default function PostJobPage() {
 
             {/* Item type picker -- grouped by loading effort. Each type has a
                 DEFAULT size and a FLOOR; the size selector below lets the
-                customer adjust within the allowed range. */}
+                customer adjust within the allowed range. Shopping-cart style:
+                once the item in progress has a description/photo, tapping a
+                different type here ADDS it as a new item -- see pickItemType. */}
             <div className={typeMissing ? 'ring-2 ring-red-400 rounded-xl p-1' : ''}>
               <label className="label">What are you moving? *</label>
+              {items.length > 1 && (
+                <p className="text-[11px] text-slate-400 mb-1.5">🛒 Tap another item below to add it to this job -- like adding to a cart.</p>
+              )}
               <div className="space-y-4">
                 {CATALOG_SECTIONS.map(section => {
                   const entries = ITEM_CATALOG.filter(e => section.sizes.includes(e.size))
@@ -479,6 +502,42 @@ export default function PostJobPage() {
                 <div><span className="font-bold">🎉 Extra-item saving:</span> because the driver is already making the trip, each extra item from the <strong>same pickup</strong> is a flat +${EXTRA_ITEM_FEE} — and small items are free.</div>
                 <div className="text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 -mx-1">
                   🚐 <strong>Heads up:</strong> all items need to fit together in the back of a single ute at the same time. Please describe how they'll be packed (e.g. stacked, disassembled) in each item's description so the driver can confirm it'll fit before accepting.
+                </div>
+              </div>
+            )}
+
+            {/* Cart summary -- every item added so far, shopping-cart style,
+                so it's obvious a 2nd/3rd item actually made it onto the job
+                instead of silently replacing the last one. */}
+            {items.length > 1 && (
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="px-3.5 py-2 bg-slate-50 text-xs font-bold text-slate-500 flex items-center justify-between">
+                  <span>🛒 Your items ({items.length})</span>
+                  <span className="font-normal text-slate-400">Tap to edit</span>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {items.map((it, i) => {
+                    const itemComplete = !!it.item_type && !!it.description.trim() && !!(it._photoFile || it.photo_url)
+                    return (
+                      <div key={i} className={`flex items-center gap-2.5 px-3.5 py-2.5 ${editingItem === i ? 'bg-orange-50' : ''}`}>
+                        <button type="button" onClick={() => setEditingItem(i)} className="flex items-center gap-2.5 flex-1 min-w-0 text-left">
+                          <span className="text-lg flex-shrink-0">{ITEM_ICON[it.item_type] || '📦'}</span>
+                          <span className="min-w-0">
+                            <span className="block text-sm font-semibold text-slate-800 truncate">{it.item_type || `Item ${i + 1} — pick a type`}</span>
+                            <span className="block text-xs text-slate-400 truncate">
+                              {it.item_type ? SIZE_LABEL[it.item_size] ?? it.item_size : ''}
+                              {it.description ? ` · ${it.description}` : ''}
+                            </span>
+                          </span>
+                        </button>
+                        {!itemComplete && (
+                          <span className="text-[10px] font-semibold text-amber-600 flex-shrink-0">Incomplete</span>
+                        )}
+                        <button type="button" onClick={() => removeItem(i)}
+                          className="text-slate-300 hover:text-red-500 flex-shrink-0 w-6 h-6 flex items-center justify-center text-sm">×</button>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )}
