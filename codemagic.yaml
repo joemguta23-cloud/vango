@@ -147,8 +147,23 @@ workflows:
           xcode-project use-profiles
       - name: Increment build number
         script: |
+          set -e
           cd ios/App
-          agvtool new-version -all $(($(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID") + 1))
+          # get-latest-app-store-build-number only sees builds that reached the
+          # public App Store, which this app has never done (TestFlight only, see
+          # publishing.app_store_connect below) - so it always returns 0/empty and
+          # the version never actually climbs. Take the higher of the App Store
+          # number and the TestFlight number instead, so a version already sitting
+          # in TestFlight (e.g. an earlier manual build) can't collide.
+          LATEST_APPSTORE=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
+          LATEST_TESTFLIGHT=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
+          LATEST_APPSTORE=${LATEST_APPSTORE:-0}
+          LATEST_TESTFLIGHT=${LATEST_TESTFLIGHT:-0}
+          LATEST=$LATEST_APPSTORE
+          if [ "$LATEST_TESTFLIGHT" -gt "$LATEST" ]; then LATEST=$LATEST_TESTFLIGHT; fi
+          NEW_BUILD=$(($LATEST + 1))
+          echo "App Store build: $LATEST_APPSTORE, TestFlight build: $LATEST_TESTFLIGHT -> using $NEW_BUILD"
+          agvtool new-version -all $NEW_BUILD
       - name: Build ipa
         script: |
           xcode-project build-ipa \
