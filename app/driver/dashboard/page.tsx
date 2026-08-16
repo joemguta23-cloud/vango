@@ -136,6 +136,16 @@ const toggleOnline = async () => {
 if (!driver) return
 setToggling(true)
 setLocationError(null)
+// Everything from here on is wrapped in try/catch/finally so `toggling`
+// is GUARANTEED to reset to false no matter what happens -- including an
+// unexpected exception from anywhere in this chain. Without this, a
+// thrown/rejected call upstream (e.g. a native plugin call that isn't
+// actually linked into the app binary) would leave the "Checking
+// location..." button stuck forever, since setToggling(false) would
+// never be reached. lib/nativePresence.ts's startDriverPresence is
+// designed to never reject, but this is deliberate belt-and-suspenders:
+// never trust that layer alone is enough.
+try {
 const goingOnline = !driver.is_online
 
 if (goingOnline) {
@@ -149,7 +159,6 @@ if (presence.ok && !presence.native) {
 locationOk = await requestForegroundLocationOnce()
 }
 if (!locationOk) {
-setToggling(false)
 setLocationError({ message: LOCATION_DENIED_MESSAGE, native: presence.native })
 return
 }
@@ -159,13 +168,16 @@ await stopDriverPresence()
 
 const { error } = await supabase.from('drivers').update({ is_online: goingOnline }).eq('id', driver.id)
 if (error) {
-setToggling(false)
 setLocationError({ message: 'Something went wrong updating your status. Please try again.', native: false })
 return
 }
 setDriver(d => d ? { ...d, is_online: goingOnline } : d)
-setToggling(false)
 loadData()
+} catch (err: any) {
+setLocationError({ message: 'Something went wrong updating your status. Please try again.', native: false })
+} finally {
+setToggling(false)
+}
 }
 
 const acceptJob = async (job: Job) => {
