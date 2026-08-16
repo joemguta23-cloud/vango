@@ -21,14 +21,32 @@
  * ever needing to resolve a JS file inside that package. We declare a
  * minimal local type for the plugin's shape instead of importing its types.
  *
- * The plugin also reports permission denial asynchronously through the
- * watcher CALLBACK (`error.code === 'NOT_AUTHORIZED'`), not by rejecting the
+ * The plugin reports permission denial asynchronously through the watcher
+ * CALLBACK (`error.code === 'NOT_AUTHORIZED'`), not by rejecting the
  * `addWatcher()` promise -- that promise resolves as soon as the watcher is
- * registered, before the OS permission prompt is necessarily resolved. So
- * `startDriverPresence` wraps the callback-based API in its own Promise that
- * settles on whichever comes first: a permission error, a successful first
- * location fix, or a bounded timeout (treated as success, since no denial
- * was reported) so a slow GPS fix can never leave the toggle hanging forever.
+ * REGISTERED, before the OS permission prompt is necessarily resolved. So
+ * `startDriverPresence` wraps the callback-based API in its own Promise.
+ *
+ * WE SETTLE ON WATCHER REGISTRATION, NOT ON THE FIRST GPS FIX. An earlier
+ * version of this file waited for the first successful location fix before
+ * letting the driver through. A cold GPS fix routinely takes several seconds
+ * (especially indoors), so every single "Go Online" tap sat on "Checking
+ * location..." for ~5s. Registration is the correct success signal: it means
+ * the watcher is running and the OS will deliver fixes as they arrive. The
+ * Promise therefore settles on whichever comes FIRST: `addWatcher()`
+ * resolving with a watcher id (success), a `NOT_AUTHORIZED` error from the
+ * callback (permission denied), an `addWatcher()` rejection or synchronous
+ * throw (watcher-failed), or the overall watchdog below. The watcher
+ * intentionally outlives the settled Promise and keeps writing every
+ * subsequent fix to Supabase.
+ *
+ * BECAUSE WE NO LONGER WAIT, A DENIAL CAN ARRIVE LATE. The OS permission
+ * prompt may still be on screen when we resolve `{ ok: true }`. If the
+ * driver then denies it, `startDriverPresence`'s optional `onLateDenial`
+ * callback fires so the caller can put the driver straight back Offline --
+ * a driver must NEVER stay Online with no location. The dashboard uses this
+ * to revert local state, write `is_online: false`, and show the denial
+ * message with the "Open location settings" button.
  *
  * THE WATCHDOG COVERS THE WHOLE FUNCTION, NOT JUST THE WATCHER. An earlier
  * version of this file registered that bounded timeout INSIDE the returned
@@ -40,7 +58,7 @@
  * the Promise was never constructed, the timeout was never registered, and
  * nothing ever settled -- drivers sat on "Checking location..." until the
  * dashboard's own outer 20s guard tripped with "Timed out: location check".
- * `startDriverPresence` therefore now races its ENTIRE body -- native check,
+ * `startDriverPresence` therefore races its ENTIRE body -- native check,
  * dynamic imports and `addWatcher()` alike -- against a single
  * `PRESENCE_OVERALL_TIMEOUT_MS` watchdog, which is deliberately well under
  * the caller's 20s limit so this watchdog always wins.
@@ -68,7 +86,9 @@
  * never go Online, on any platform, without actively sharing location.
  *
  * All Capacitor imports are dynamic so they are never evaluated during
- * server-side rendering or on the web.
+ * server-side rendering or on the web, and every helper here shares ONE
+ * cached `import('@capacitor/core')` promise so that chunk is fetched at
+ * most once per session.
  */
 import { createSupabaseBrowserClient } from '@/lib/supabase'
 
@@ -98,18 +118,36 @@ interface BackgroundGeolocationPlugin {
 
 // Single overall watchdog for `startDriverPresence`. It guards EVERYTHING:
 // the `isNativeApp()` check, the dynamic `import('@capacitor/core')` inside
-// `getPlugin()`, and the `addWatcher()` round trip / first location fix.
-// This must stay comfortably below the driver dashboard's 20s
+// `getPlugin()`, and the `addWatcher()` REGISTRATION round trip. Now that we
+// no longer block on a first GPS fix, 3s is generous for all of that -- and
+// it caps the worst-case "Go Online" wait at ~3s instead of ~8s. It must
+// stay comfortably below the driver dashboard's 20s
 // `withTimeout(..., 'location check')` so this watchdog always wins and the
 // driver gets a working toggle instead of "Timed out: location check".
-const PRESENCE_OVERALL_TIMEOUT_MS = 8000
+const PRESENCE_OVERALL_TIMEOUT_MS = 3000
 
-// The teardown helpers also `await import('@capacitor/core')`, so they get a
-// (shorter) bound of their own -- neither may hang the caller forever.
+// The teardown helpers also need @capacitor/core, so they get a (shorter)
+// bound of their own -- neither may hang the caller forever.
 const PRESENCE_TEARDOWN_TIMEOUT_MS = 4000
 
 let watcherId: string | null = null
 let cachedPlugin: BackgroundGeolocationPlugin | null = null
+
+// `isNativeApp()` and `getPlugin()` both need @capacitor/core. Caching the
+// import PROMISE (rather than importing separately in each) means the
+// webpack chunk is resolved once and every later caller gets it instantly.
+// A failed import is not cached, so a transient network blip can be retried.
+let capacitorCorePromise: Promise<typeof import('@capacitor/core')> | null = null
+
+function loadCapacitorCore(): Promise<typeof import('@capacitor/core')> {
+  if (!capacitorCorePromise) {
+    capacitorCorePromise = import('@capacitor/core').catch((err) => {
+      capacitorCorePromise = null
+      throw err
+    })
+  }
+  return capacitorCorePromise
+}
 
 /**
  * Resolve `work`, or `fallback` if `work` hasn't settled within `ms`.
@@ -128,7 +166,7 @@ function withDeadline<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> 
 
 async function isNativeApp(): Promise<boolean> {
   try {
-    const { Capacitor } = await import('@capacitor/core')
+    const { Capacitor } = await loadCapacitorCore()
     return Capacitor.isNativePlatform()
   } catch {
     return false
@@ -137,10 +175,17 @@ async function isNativeApp(): Promise<boolean> {
 
 async function getPlugin(): Promise<BackgroundGeolocationPlugin> {
   if (cachedPlugin) return cachedPlugin
-  const { registerPlugin } = await import('@capacitor/core')
+  const { registerPlugin } = await loadCapacitorCore()
   cachedPlugin = registerPlugin<BackgroundGeolocationPlugin>('BackgroundGeolocation')
   return cachedPlugin
 }
+
+// Shared between `startDriverPresence` and its inner body so the watcher
+// callback can tell whether the caller has ALREADY been handed an
+// `{ ok: true }` result (by us or by the watchdog). If it has, a denial
+// arriving afterwards can't be returned -- it has to go out of band through
+// `onLateDenial`.
+type PresenceDelivery = { deliveredOk: boolean }
 
 /**
  * Begin background location tracking for a driver who wants to go Online.
@@ -150,8 +195,15 @@ async function getPlugin(): Promise<BackgroundGeolocationPlugin> {
  * `{ ok: false }` (never throws) when permission is denied or the watcher
  * fails to start, so the dashboard can show a clear explanation and keep the
  * driver Offline rather than silently letting them go online untracked.
+ *
+ * `onLateDenial` is invoked (at most once, never throwing) if the driver
+ * denies location AFTER this promise has already resolved `{ ok: true }` --
+ * see module doc. The caller must use it to force the driver back Offline.
  */
-export async function startDriverPresence(driverId: string): Promise<DriverPresenceResult> {
+export async function startDriverPresence(
+  driverId: string,
+  onLateDenial?: (message: string) => void
+): Promise<DriverPresenceResult> {
   // The watchdog MUST wrap the dynamic `import()` calls too, not just the
   // addWatcher promise. Those imports fetch webpack chunks over the network
   // inside the Capacitor WebView and can stall indefinitely; when that
@@ -161,25 +213,35 @@ export async function startDriverPresence(driverId: string): Promise<DriverPrese
   //
   // The watchdog resolves to SUCCESS, not failure, on purpose. The policy
   // requirement is that the driver has GRANTED location permission and a
-  // watcher has been REQUESTED. A slow first GPS fix, or a slow chunk
-  // import, is not a permission refusal and must not stop a driver from
-  // working. An explicit `NOT_AUTHORIZED` denial still resolves
-  // `{ ok: false, reason: 'permission-denied' }` via the watcher callback,
-  // and still wins whenever it arrives before this deadline. The watcher
-  // itself outlives this race either way and keeps writing coordinates to
-  // Supabase, so customers still see the driver move.
-  return withDeadline<DriverPresenceResult>(
-    startDriverPresenceInner(driverId),
+  // watcher has been REQUESTED. A slow chunk import, or slow watcher
+  // registration, is not a permission refusal and must not stop a driver
+  // from working. An explicit `NOT_AUTHORIZED` denial still resolves
+  // `{ ok: false, reason: 'permission-denied' }` via the watcher callback
+  // whenever it arrives before this deadline -- and `onLateDenial` covers
+  // it when it arrives after. The watcher itself outlives this race either
+  // way and keeps writing coordinates to Supabase, so customers still see
+  // the driver move.
+  const delivery: PresenceDelivery = { deliveredOk: false }
+  const result = await withDeadline<DriverPresenceResult>(
+    startDriverPresenceInner(driverId, delivery, onLateDenial),
     PRESENCE_OVERALL_TIMEOUT_MS,
     { ok: true, native: true }
   )
+  // Record that the caller has been told "you're online", so any denial from
+  // here on is routed to `onLateDenial` instead of being silently dropped.
+  if (result.ok) delivery.deliveredOk = true
+  return result
 }
 
 /**
  * The real body of `startDriverPresence`. Never call this directly -- it has
  * no time bound of its own; `startDriverPresence` supplies the watchdog.
  */
-async function startDriverPresenceInner(driverId: string): Promise<DriverPresenceResult> {
+async function startDriverPresenceInner(
+  driverId: string,
+  delivery: PresenceDelivery,
+  onLateDenial?: (message: string) => void
+): Promise<DriverPresenceResult> {
   if (watcherId) return { ok: true, native: true }
   if (!(await isNativeApp())) return { ok: true, native: false }
 
@@ -199,10 +261,30 @@ async function startDriverPresenceInner(driverId: string): Promise<DriverPresenc
 
   return new Promise<DriverPresenceResult>((resolve) => {
     let settled = false
-    const finish = (result: DriverPresenceResult) => {
-      if (settled) return
+    let denied = false
+    let lateDenialSent = false
+
+    // Returns true only if THIS call is the one that settled the promise,
+    // so the caller can tell a won race from a no-op.
+    const finish = (result: DriverPresenceResult): boolean => {
+      if (settled) return false
       settled = true
       resolve(result)
+      return true
+    }
+
+    // A denial that lands after the caller already has an `{ ok: true }`
+    // result can't be returned, so hand it over out of band. Deliberately
+    // defensive: a throwing handler must not become an unhandled rejection
+    // inside the plugin's callback.
+    const reportLateDenial = (message: string) => {
+      if (lateDenialSent || !onLateDenial) return
+      lateDenialSent = true
+      try {
+        onLateDenial(message)
+      } catch {
+        /* never let the caller's handler break the watcher */
+      }
     }
 
     try {
@@ -217,22 +299,39 @@ async function startDriverPresenceInner(driverId: string): Promise<DriverPresenc
           },
           (location, error) => {
             if (error) {
-              watcherId = null
               const permissionDenied = error.code === 'NOT_AUTHORIZED'
-              finish({
+              const message = error.message || 'Could not start background location.'
+              const registeredId = watcherId
+              denied = true
+              watcherId = null
+              // If the watcher had already been registered (late denial),
+              // tear it down -- otherwise a stale id would make the next
+              // `startDriverPresence` short-circuit to success.
+              if (registeredId) {
+                try {
+                  plugin.removeWatcher({ id: registeredId }).catch(() => {})
+                } catch {
+                  /* no-op */
+                }
+              }
+              const wonTheRace = finish({
                 ok: false,
                 native: true,
                 reason: permissionDenied ? 'permission-denied' : 'watcher-failed',
-                message: error.message || 'Could not start background location.',
+                message,
               })
+              // Too late to return this failure? Then push it to the caller.
+              if (permissionDenied && (!wonTheRace || delivery.deliveredOk)) {
+                reportLateDenial(message)
+              }
               return
             }
             if (!location) return
-            finish({ ok: true, native: true })
             // Keep streaming to Supabase on EVERY fix, including the ones
-            // that arrive long after the promise above has settled (either
-            // here or via the overall watchdog). This is what customers see
-            // as the driver's live position.
+            // that arrive long after the promise above has settled. This is
+            // what customers see as the driver's live position. It is NOT a
+            // settle condition -- waiting for it is what made going Online
+            // feel slow.
             supabase
               .from('drivers')
               .update({ current_lat: location.latitude, current_lng: location.longitude })
@@ -240,7 +339,22 @@ async function startDriverPresenceInner(driverId: string): Promise<DriverPresenc
               .then()
           }
         )
-        .then((id) => { watcherId = id })
+        .then((id) => {
+          // A denial beat registration -- don't keep the watcher around.
+          if (denied) {
+            try {
+              plugin.removeWatcher({ id }).catch(() => {})
+            } catch {
+              /* no-op */
+            }
+            return
+          }
+          watcherId = id
+          // REGISTRATION is the success signal. The OS has accepted the
+          // watcher; fixes will follow on their own schedule and there is
+          // no reason to make the driver wait for the first one.
+          finish({ ok: true, native: true })
+        })
         .catch((err: any) => {
           watcherId = null
           finish({
@@ -294,7 +408,7 @@ export async function stopDriverPresence(): Promise<void> {
  * Jump the driver to the native app's settings page so they can grant
  * location permission after previously declining it. Safe no-op on the web
  * or if the plugin can't be reached — and time-bounded, because it too has
- * to `await import('@capacitor/core')`.
+ * to load @capacitor/core.
  */
 export async function openDriverLocationSettings(): Promise<void> {
   await withDeadline<void>(
