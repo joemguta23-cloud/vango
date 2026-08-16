@@ -13,7 +13,8 @@ import { createSupabaseBrowserClient } from '@/lib/supabase'
 // refuses to complete OAuth inside an embedded WebView at all. So on native
 // we request a vanute:// redirect instead, open the provider URL in an
 // in-app browser tab (@capacitor/browser), and let OAuthDeepLink (mounted in
-// app/layout.tsx) catch the vanute://auth/callback return and finish sign-in.
+// app/layout.tsx) catch the vanute://auth/callback return, close the in-app
+// browser, and finish sign-in.
 type Provider = 'google' | 'facebook' | 'apple'
 
 const GoogleIcon = () => (
@@ -74,6 +75,12 @@ export default function SocialAuthButtons({ role }: { role?: string }) {
       setBusy(null)
       void handle.remove()
     })
+    // Safety net: OAuthDeepLink.tsx normally clears this by navigating the
+    // page away once the vanute://auth/callback deep link comes back and the
+    // browser is closed. If that handoff ever fails for an unrelated reason
+    // (network hiccup, an OS quirk), this stops the button being stuck on
+    // "Redirecting…" forever -- the person can just try again.
+    setTimeout(() => setBusy(prev => (prev === provider ? null : prev)), 45000)
     await Browser.open({ url: data.url })
   }
 
