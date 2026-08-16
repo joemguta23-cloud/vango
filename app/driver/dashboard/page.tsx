@@ -71,6 +71,20 @@ navigator.geolocation.getCurrentPosition(
 })
 }
 
+// No await in toggleOnline may hang forever -- if any step stalls the button
+// would sit on "Checking location..." with no way out (the exact bug this
+// guards against). Supabase's JS client in particular has NO default request
+// timeout, so a stalled network call would otherwise never settle. Takes a
+// PromiseLike so Supabase's thenable query builders can be passed straight in.
+function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Promise<T> {
+return Promise.race([
+promise,
+new Promise<T>((_, reject) =>
+setTimeout(() => reject(new Error(`Timed out: ${label}`)), ms)
+),
+])
+}
+
 const LOCATION_DENIED_MESSAGE =
 "Vanute needs your location, including while the app is in the background, so customers can see where you are during a delivery. Please allow location access (in your phone's Settings app if you already declined it) and try going online again."
 
@@ -82,6 +96,9 @@ const [jobs, setJobs] = useState<Job[]>([])
 const [myJobs, setMyJobs] = useState<Job[]>([])
 const [loading, setLoading] = useState(true)
 const [toggling, setToggling] = useState(false)
+// Human-readable label for the step toggleOnline is currently on, so the
+// button itself shows exactly where it is (and where it stalled, if it does).
+const [step, setStep] = useState<string>('')
 const [refreshing, setRefreshing] = useState(false)
 // `native` tracks whether the denial happened inside the native app (in
 // which case we can offer a direct jump to the OS settings screen) or on
@@ -153,20 +170,33 @@ if (goingOnline) {
 // is_online: true anywhere -- a driver must never appear online to
 // customers without their location actually being shared. See
 // lib/nativePresence.ts for what "ok" means on native vs. web.
-const presence = await startDriverPresence(driver.id)
+setStep('Checking location…')
+const presence = await withTimeout(startDriverPresence(driver.id), 20000, 'location check')
 let locationOk = presence.ok
 if (presence.ok && !presence.native) {
-locationOk = await requestForegroundLocationOnce()
+setStep('Checking location permission…')
+locationOk = await withTimeout(requestForegroundLocationOnce(), 15000, 'location permission')
 }
 if (!locationOk) {
 setLocationError({ message: LOCATION_DENIED_MESSAGE, native: presence.native })
 return
 }
 } else {
-await stopDriverPresence()
+setStep('Going offline…')
+await withTimeout(stopDriverPresence(), 10000, 'stopping location')
 }
 
-const { error } = await supabase.from('drivers').update({ is_online: goingOnline }).eq('id', driver.id)
+setStep('Saving status…')
+
+const { error } = await withTimeout(
+
+supabase.from('drivers').update({ is_online: goingOnline }).eq('id', driver.id),
+
+15000,
+
+'saving status'
+
+)
 if (error) {
 setLocationError({ message: 'Something went wrong updating your status. Please try again.', native: false })
 return
@@ -174,9 +204,16 @@ return
 setDriver(d => d ? { ...d, is_online: goingOnline } : d)
 loadData()
 } catch (err: any) {
-setLocationError({ message: 'Something went wrong updating your status. Please try again.', native: false })
+// Surface the ACTUAL failure (including "Timed out: <step>" from
+// withTimeout above) so a stuck toggle can be reported precisely
+// instead of hiding behind a generic message.
+setLocationError({
+message: `Could not go online: ${err?.message || String(err) || 'unknown error'}. Please try again — if this keeps happening, screenshot this message.`,
+native: false,
+})
 } finally {
 setToggling(false)
+setStep('')
 }
 }
 
@@ -216,7 +253,7 @@ driver?.is_online
 : 'bg-white/10 border-white/15 text-slate-300'
 }`}>
 <span className={`w-2 h-2 rounded-full ${driver?.is_online ? 'bg-green-400' : 'bg-slate-500'}`} />
-{toggling ? 'Checking location...' : driver?.is_online ? 'Online - accepting jobs' : 'Offline - tap to go online'}
+{toggling ? (step || 'Checking location…') : driver?.is_online ? 'Online - accepting jobs' : 'Offline - tap to go online'}
 </button>
 <a
 href="/driver/notifications"
