@@ -169,11 +169,11 @@ export async function sendNativePush(
 // Drivers control each channel independently from /driver/notifications.
 // All three default to TRUE, so a driver who never touches settings gets
 // everything. Only an explicit false opts them out. Customers have no driver
-// row, so they always receive everything.
+// row, so they always receive everything (except native push -- see below).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function notifyUser(supabase: any, { userId, title, body, url }: NotifyPayload) {
   const [{ data: profile }, { data: subs }, { data: driver }] = await Promise.all([
-    supabase.from('profiles').select('phone').eq('id', userId).single(),
+    supabase.from('profiles').select('phone, push_token, push_enabled').eq('id', userId).single(),
     supabase.from('push_subscriptions').select('*').eq('user_id', userId),
     supabase
       .from('drivers')
@@ -188,9 +188,19 @@ export async function notifyUser(supabase: any, { userId, title, body, url }: No
   const pushAllowed = !driver || driver.push_enabled !== false
   const smsAllowed = !driver || driver.sms_enabled !== false
   const emailAllowed = !driver || driver.email_enabled !== false
+  const profilePushAllowed = profile?.push_enabled !== false
 
-  if (driver?.push_token && pushAllowed) {
-    await sendNativePush([driver.push_token], { title, body, url: fullUrl })
+  // Native push tokens can come from two places: drivers.push_token (set when
+  // a driver goes Online) and profiles.push_token (set for ANY signed-in user
+  // via PushRegistration, so buyers get chat alerts too -- previously buyers
+  // had no push-token registration path at all). Both can end up populated
+  // for the same driver/device, so dedupe before sending to avoid a double
+  // notification.
+  const nativeTokens = new Set<string>()
+  if (driver?.push_token && pushAllowed) nativeTokens.add(driver.push_token)
+  if (profile?.push_token && profilePushAllowed) nativeTokens.add(profile.push_token)
+  if (nativeTokens.size) {
+    await sendNativePush([...nativeTokens], { title, body, url: fullUrl })
   }
 
   if (smsAllowed && profile?.phone) {
