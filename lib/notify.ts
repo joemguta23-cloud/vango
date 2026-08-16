@@ -50,56 +50,55 @@ export async function sendPush(
   }
 }
 
-// -- Native push (iOS/Android) via Firebase Cloud Messaging v1 -----------------
+// -- Native push straight to Apple (APNs) -------------------------------------
 //
-// This is the Uber-style banner: it appears over whatever the driver is doing
-// (YouTube, Netflix, locked screen). Web push does NOT work inside the iOS app
-// (WKWebView has no service-worker push), so the native app relies on this path.
-// lib/push.ts stores the device token on drivers.push_token when they go Online.
+// This is the Uber-style banner: it lands over whatever the driver is doing
+// (YouTube, Netflix, locked screen). Web push does NOT work inside the iOS app,
+// so the native app depends on this path.
 //
-// Requires two env vars:
-//   FCM_PROJECT_ID            - Firebase project id
-//   FCM_SERVICE_ACCOUNT_JSON  - the whole service-account JSON, as one line
+// @capacitor/push-notifications hands back a raw APNs device token, which is
+// what we store on drivers.push_token - so we talk to Apple directly rather
+// than going through Firebase (an APNs token is NOT an FCM token).
+//
+// APNs requires HTTP/2, and fetch/undici is HTTP/1.1 only - hence node:http2.
+//
+// Env vars:
+//   APNS_KEY_ID       - the 10-char Key ID of the .p8 auth key
+//   APNS_TEAM_ID      - Apple team id (W4HM867WCU)
+//   APNS_PRIVATE_KEY  - contents of the .p8, newlines may be escaped as \\n
+//   APNS_BUNDLE_ID    - defaults to au.com.vanute
+//   APNS_SANDBOX      - 'true' only for Xcode-installed builds; TestFlight and
+//                       the App Store both use production, which is the default
 
-let cachedToken: { value: string; expires: number } | null = null
+let cachedJwt: { value: string; made: number } | null = null
 
-async function getFcmAccessToken(): Promise<string | null> {
-  const raw = process.env.FCM_SERVICE_ACCOUNT_JSON
-  if (!raw) return null
-  if (cachedToken && cachedToken.expires > Date.now() + 60_000) return cachedToken.value
+function buildApnsJwt(): string | null {
+  const keyId = process.env.APNS_KEY_ID
+  const teamId = process.env.APNS_TEAM_ID
+  const raw = process.env.APNS_PRIVATE_KEY
+  if (!keyId || !teamId || !raw) return null
+
+  // Apple rotates tokens hourly; reuse for 45 min to stay well inside the limit.
+  if (cachedJwt && Date.now() - cachedJwt.made < 45 * 60 * 1000) return cachedJwt.value
 
   try {
-    const sa = JSON.parse(raw)
-    const now = Math.floor(Date.now() / 1000)
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createSign } = require('crypto')
+    const privateKey = raw.includes('BEGIN') ? raw.replace(/\\n/g, '\n') : raw
     const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
     const unsigned =
-      enc({ alg: 'RS256', typ: 'JWT' }) +
+      enc({ alg: 'ES256', kid: keyId }) +
       '.' +
-      enc({
-        iss: sa.client_email,
-        scope: 'https://www.googleapis.com/auth/firebase.messaging',
-        aud: 'https://oauth2.googleapis.com/token',
-        iat: now,
-        exp: now + 3600,
-      })
+      enc({ iss: teamId, iat: Math.floor(Date.now() / 1000) })
 
-    const { createSign } = await import('crypto')
-    const signature = createSign('RSA-SHA256').update(unsigned).sign(sa.private_key, 'base64url')
-    const assertion = unsigned + '.' + signature
+    // APNs wants a JOSE (r||s) signature, not the DER default.
+    const signature = createSign('SHA256')
+      .update(unsigned)
+      .sign({ key: privateKey, dsaEncoding: 'ieee-p1363' }, 'base64url')
 
-    const res = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-        assertion,
-      }).toString(),
-    })
-    if (!res.ok) return null
-    const json = await res.json()
-    if (!json.access_token) return null
-    cachedToken = { value: json.access_token, expires: Date.now() + 3500 * 1000 }
-    return cachedToken.value
+    const jwt = unsigned + '.' + signature
+    cachedJwt = { value: jwt, made: Date.now() }
+    return jwt
   } catch {
     return null
   }
@@ -109,33 +108,59 @@ export async function sendNativePush(
   tokens: string[],
   payload: { title: string; body: string; url?: string }
 ) {
-  const projectId = process.env.FCM_PROJECT_ID
-  const accessToken = await getFcmAccessToken()
-  if (!projectId || !accessToken || tokens.length === 0) return
+  const jwt = buildApnsJwt()
+  if (!jwt || tokens.length === 0) return
 
-  const endpoint = 'https://fcm.googleapis.com/v1/projects/' + projectId + '/messages:send'
+  const bundleId = process.env.APNS_BUNDLE_ID || 'au.com.vanute'
+  const host =
+    process.env.APNS_SANDBOX === 'true'
+      ? 'https://api.sandbox.push.apple.com'
+      : 'https://api.push.apple.com'
 
-  for (const token of tokens) {
-    try {
-      await fetch(endpoint, {
-        method: 'POST',
-        headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: {
-            token,
-            notification: { title: payload.title, body: payload.body },
-            data: payload.url ? { url: payload.url } : undefined,
-            apns: { payload: { aps: { sound: 'default', badge: 1 } } },
-            android: {
-              priority: 'HIGH',
-              notification: { sound: 'default', channel_id: 'vanute_jobs' },
-            },
-          },
-        }),
-      })
-    } catch {
-      /* one bad token must not stop the rest of the blast */
-    }
+  const body = JSON.stringify({
+    aps: {
+      alert: { title: payload.title, body: payload.body },
+      sound: 'default',
+      badge: 1,
+    },
+    url: payload.url,
+  })
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const http2 = require('http2')
+    const client = http2.connect(host)
+    client.on('error', () => {})
+
+    await Promise.all(
+      tokens.map(
+        (token) =>
+          new Promise<void>((resolve) => {
+            const req = client.request({
+              ':method': 'POST',
+              ':path': '/3/device/' + token,
+              authorization: 'bearer ' + jwt,
+              'apns-topic': bundleId,
+              'apns-push-type': 'alert',
+              'apns-priority': '10',
+              'content-type': 'application/json',
+            })
+            req.setTimeout(8000, () => {
+              req.close()
+              resolve()
+            })
+            req.on('error', () => resolve())
+            req.on('end', () => resolve())
+            req.on('response', () => {})
+            req.resume()
+            req.end(body)
+          })
+      )
+    )
+
+    client.close()
+  } catch {
+    /* never let a push failure break the job flow */
   }
 }
 
@@ -144,7 +169,7 @@ export async function sendNativePush(
 // Drivers control each channel independently from /driver/notifications.
 // All three default to TRUE, so a driver who never touches settings gets
 // everything. Only an explicit false opts them out. Customers have no driver
-// row, so they always receive everything (there is nothing to opt out of yet).
+// row, so they always receive everything.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function notifyUser(supabase: any, { userId, title, body, url }: NotifyPayload) {
   const [{ data: profile }, { data: subs }, { data: driver }] = await Promise.all([
@@ -164,7 +189,6 @@ export async function notifyUser(supabase: any, { userId, title, body, url }: No
   const smsAllowed = !driver || driver.sms_enabled !== false
   const emailAllowed = !driver || driver.email_enabled !== false
 
-  // Banner push first - this is the one the driver actually feels on their phone.
   if (driver?.push_token && pushAllowed) {
     await sendNativePush([driver.push_token], { title, body, url: fullUrl })
   }
