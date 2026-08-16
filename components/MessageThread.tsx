@@ -6,7 +6,7 @@ import { createSupabaseBrowserClient } from '@/lib/supabase'
 // tracking page and the driver active-job page open this in a modal.
 // Access control is enforced by the job_messages RLS policies -- only the
 // job's buyer or assigned driver can read/send. Includes Block + Report
-// for user safety (records to chat_safety_actions for Vanute review).
+// for user safety (records to chat_safety_actions for VanGo review).
 //
 // Latency design (feels instant, no manual refresh needed):
 //  - Sending appends the message to the local list immediately (optimistic),
@@ -15,6 +15,10 @@ import { createSupabaseBrowserClient } from '@/lib/supabase'
 //    poll fallback, so the other side shows up within ~2s even if the
 //    websocket is slow or drops. fetchMessages replaces the full list, so
 //    the optimistic copy reconciles with the server row (deduped by id).
+//  - Sending goes through /api/jobs/message (not a direct insert) so the
+//    server can also push a real notification to the OTHER participant --
+//    a driver/buyer who isn't looking at the chat still finds out a reply
+//    landed, instead of only discovering it next time they open the app.
 export default function MessageThread({ jobId, onClose }: { jobId: string; onClose: () => void }) {
   const supabase = createSupabaseBrowserClient()
   const [messages, setMessages] = useState<any[]>([])
@@ -80,11 +84,23 @@ export default function MessageThread({ jobId, onClose }: { jobId: string; onClo
     const tempId = `temp-${Date.now()}`
     const optimistic = { id: tempId, job_id: jobId, sender_id: userId, body: text, created_at: new Date().toISOString(), __optimistic: true }
     setMessages(prev => [...prev, optimistic])
-    const { data, error } = await supabase
-      .from('job_messages')
-      .insert({ job_id: jobId, sender_id: userId, body: text })
-      .select('*, sender:profiles(full_name)')
-      .single()
+
+    let data: any = null
+    let error: string | null = null
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/jobs/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+        body: JSON.stringify({ jobId, body: text }),
+      })
+      const json = await res.json()
+      if (!res.ok) error = json.error || 'Failed to send'
+      else data = json.message
+    } catch {
+      error = 'Failed to send'
+    }
+
     if (error) {
       // Roll back the optimistic message and restore the text so nothing is lost.
       setMessages(prev => prev.filter(m => m.id !== tempId))
@@ -101,12 +117,12 @@ export default function MessageThread({ jobId, onClose }: { jobId: string; onClo
 
   const reportMessage = async (m: any) => {
     if (!userId) return
-    const reason = window.prompt('Report this message to Vanute. Briefly, what is wrong? (optional)')
+    const reason = window.prompt('Report this message to VanGo. Briefly, what is wrong? (optional)')
     if (reason === null) return // cancelled
     await supabase.from('chat_safety_actions').insert({
       job_id: jobId, actor_id: userId, target_user_id: m.sender_id, message_id: m.__optimistic ? null : m.id, action_type: 'report', note: reason || null,
     })
-    window.alert('Thanks -- this message has been reported to Vanute for review.')
+    window.alert('Thanks -- this message has been reported to VanGo for review.')
   }
 
   const blockUser = async () => {
@@ -136,7 +152,7 @@ export default function MessageThread({ jobId, onClose }: { jobId: string; onClo
             <p className="text-sm text-slate-400 text-center py-8">No messages yet -- say hi!</p>
           )}
           {blocked && (
-            <p className="text-sm text-slate-500 text-center py-6 bg-slate-50 rounded-xl">You have blocked this user. Vanute has been notified. Close this chat to continue.</p>
+            <p className="text-sm text-slate-500 text-center py-6 bg-slate-50 rounded-xl">You have blocked this user. VanGo has been notified. Close this chat to continue.</p>
           )}
           {!blocked && messages.map(m => (
             <div key={m.id} className={`flex ${m.sender_id === userId ? 'justify-end' : 'justify-start'}`}>
