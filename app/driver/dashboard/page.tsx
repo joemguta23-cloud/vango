@@ -107,6 +107,12 @@ const [locationError, setLocationError] = useState<{ message: string; native: bo
 
 useEffect(() => {
 loadData()
+// Warm the Capacitor core chunk up front. startDriverPresence() has to
+// `await import('@capacitor/core')` on the driver's first tap of the
+// Online toggle, and fetching that webpack chunk over the network inside
+// the Capacitor WebView is a real slice of the go-online latency. This is
+// fire-and-forget on purpose: it never blocks render or loadData().
+void import('@capacitor/core').catch(() => {})
 const channel = supabase
 .channel('pending-jobs')
 .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, () => loadData())
@@ -149,6 +155,26 @@ await loadData()
 setRefreshing(false)
 }
 
+// A driver can now go Online before the OS permission prompt has been
+// answered -- lib/nativePresence.ts settles as soon as the location
+// watcher is REGISTERED, which is what makes the toggle fast. If the
+// driver then denies location, this fires: put them straight back
+// Offline so nobody is ever shown as online without live location.
+// Deliberately defensive -- it runs from inside a native plugin
+// callback, so nothing here may throw or leave an unhandled rejection.
+const handleLateLocationDenial = (driverId: string) => {
+  try {
+    setDriver(d => (d && d.id === driverId ? { ...d, is_online: false } : d))
+    setLocationError({ message: LOCATION_DENIED_MESSAGE, native: true })
+    supabase.from('drivers').update({ is_online: false }).eq('id', driverId).then(
+      () => {},
+      () => {}
+    )
+  } catch {
+    /* never let a late-denial callback break anything */
+  }
+}
+
 const toggleOnline = async () => {
 if (!driver) return
 setToggling(true)
@@ -171,7 +197,7 @@ if (goingOnline) {
 // customers without their location actually being shared. See
 // lib/nativePresence.ts for what "ok" means on native vs. web.
 setStep('Checking location…')
-const presence = await withTimeout(startDriverPresence(driver.id), 20000, 'location check')
+const presence = await withTimeout(startDriverPresence(driver.id, () => handleLateLocationDenial(driver.id)), 20000, 'location check')
 let locationOk = presence.ok
 if (presence.ok && !presence.native) {
 setStep('Checking location permission…')
