@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import SessionKeepAlive from '@/components/SessionKeepAlive'
+import OAuthDeepLink from '@/components/OAuthDeepLink'
 
 const SITE_URL = 'https://vanute.com.au'
 
@@ -94,6 +95,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {/* Keeps the session alive when the app is backgrounded (see component). */}
         <SessionKeepAlive />
+        {/* Catches the native OAuth (Google/Facebook/Apple) deep-link return (see component). */}
+        <OAuthDeepLink />
         {children}
       </body>
     </html>
