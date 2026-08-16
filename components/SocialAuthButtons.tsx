@@ -7,6 +7,13 @@ import { createSupabaseBrowserClient } from '@/lib/supabase'
 // provider redirects back to /auth/callback, where the session is picked up
 // and the user is routed by role. Pass `role` on the signup page so a brand
 // new driver lands in driver onboarding instead of the customer flow.
+//
+// In the native app (Capacitor) a plain HTTPS redirectTo would hand the user
+// off to Safari/Chrome with no way back into the app - Google specifically
+// refuses to complete OAuth inside an embedded WebView at all. So on native
+// we request a vanute:// redirect instead, open the provider URL in an
+// in-app browser tab (@capacitor/browser), and let OAuthDeepLink (mounted in
+// app/layout.tsx) catch the vanute://auth/callback return and finish sign-in.
 type Provider = 'google' | 'facebook' | 'apple'
 
 const GoogleIcon = () => (
@@ -34,26 +41,67 @@ const PROVIDERS: { id: Provider; label: string; Icon: () => JSX.Element }[] = [
   { id: 'apple', label: 'Continue with Apple', Icon: AppleIcon },
 ]
 
+const oauthErrorMessage = (message: string) =>
+  /not enabled/i.test(message)
+    ? 'This sign-in option is being set up — please use email for now.'
+    : message
+
 export default function SocialAuthButtons({ role }: { role?: string }) {
   const supabase = createSupabaseBrowserClient()
   const [busy, setBusy] = useState<Provider | null>(null)
   const [error, setError] = useState('')
 
-  const signIn = async (provider: Provider) => {
-    setBusy(provider)
-    setError('')
+  const signInNative = async (provider: Provider) => {
+    const redirectTo = `vanute://auth/callback${role ? `?role=${encodeURIComponent(role)}` : ''}`
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo, skipBrowserRedirect: true },
+    })
+    if (error) {
+      setError(oauthErrorMessage(error.message))
+      setBusy(null)
+      return
+    }
+    if (!data?.url) {
+      setError('Could not start sign-in. Please try again.')
+      setBusy(null)
+      return
+    }
+    const { Browser } = await import('@capacitor/browser')
+    // If the user closes the in-app browser without finishing, re-enable the
+    // button instead of leaving it stuck on "Redirecting…" forever.
+    const handle = await Browser.addListener('browserFinished', () => {
+      setBusy(null)
+      void handle.remove()
+    })
+    await Browser.open({ url: data.url })
+  }
+
+  const signInWeb = async (provider: Provider) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://www.vanute.com.au'
     const redirectTo = `${origin}/auth/callback${role ? `?role=${encodeURIComponent(role)}` : ''}`
     const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo } })
     // On success the browser is redirected to the provider; on failure we stay.
     if (error) {
-      setError(
-        /not enabled/i.test(error.message)
-          ? 'This sign-in option is being set up — please use email for now.'
-          : error.message
-      )
+      setError(oauthErrorMessage(error.message))
       setBusy(null)
     }
+  }
+
+  const signIn = async (provider: Provider) => {
+    setBusy(provider)
+    setError('')
+
+    let isNative = false
+    try {
+      const { Capacitor } = await import('@capacitor/core')
+      isNative = Capacitor.isNativePlatform()
+    } catch {
+      isNative = false // plain web build - @capacitor/core isn't resolvable
+    }
+
+    if (isNative) await signInNative(provider)
+    else await signInWeb(provider)
   }
 
   return (
