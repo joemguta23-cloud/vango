@@ -153,6 +153,12 @@ export default function DriverDashboardPage() {
               <span className={`w-2 h-2 rounded-full ${driver?.is_online ? 'bg-green-400' : 'bg-slate-500'}`} />
               {driver?.is_online ? 'Online - accepting jobs' : 'Offline - tap to go online'}
             </button>
+            <a
+              href="/driver/notifications"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border font-semibold text-sm bg-white/10 border-white/15 text-slate-300 hover:bg-white/15 transition-colors"
+            >
+              🔔 Job alerts
+            </a>
             <span className="text-xs bg-white/10 border border-white/15 text-slate-300 px-3 py-1.5 rounded-lg font-semibold">
               {driver?.vehicle_make} {driver?.vehicle_model} - {driver?.vehicle_plate}
             </span>
