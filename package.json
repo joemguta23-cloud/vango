@@ -24,6 +24,7 @@
     "web-push": "^3.6.7",
     "@capacitor/core": "^8.0.0",
     "@capacitor/app": "^8.0.0",
+    "@capacitor/browser": "^8.0.0",
     "@capacitor/push-notifications": "^8.0.0",
     "@capacitor-community/background-geolocation": "^1.2.26"
   },
