@@ -13,6 +13,16 @@ import { createSupabaseBrowserClient } from '@/lib/supabase'
 // code) out of the deep-link URL, hand them to supabase-js so the session is
 // persisted the same way a web sign-in would be, then route to the existing
 // /auth/callback page so its role-based routing logic runs unchanged.
+//
+// IMPORTANT: iOS hands appUrlOpen to the app the instant it sees the
+// vanute:// scheme, but the in-app browser (SFSafariViewController, opened
+// via @capacitor/browser) does NOT dismiss itself just because the app
+// received the link -- it just fails to navigate and sits there, frozen on
+// whatever "redirecting..." interstitial Supabase/Google was showing right
+// before the handoff. Without an explicit Browser.close() call here, the
+// sign-in silently succeeds behind the scenes while the user stares at a
+// stuck browser sheet forever. This was the exact bug behind reports of
+// Google sign-in hanging on "Redirecting..." and never completing.
 export default function OAuthDeepLink() {
   const router = useRouter()
 
@@ -24,9 +34,14 @@ export default function OAuthDeepLink() {
         const { Capacitor } = await import('@capacitor/core')
         if (!Capacitor.isNativePlatform()) return
         const { App } = await import('@capacitor/app')
+        const { Browser } = await import('@capacitor/browser')
 
         const handle = await App.addListener('appUrlOpen', async ({ url }: { url: string }) => {
           if (!url.startsWith('vanute://auth/callback')) return
+
+          // Dismiss the in-app browser immediately -- see note above. Safe to
+          // call even if it's already closed.
+          try { await Browser.close() } catch { /* already closed */ }
 
           const supabase = createSupabaseBrowserClient()
 
