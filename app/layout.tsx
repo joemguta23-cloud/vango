@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import SessionKeepAlive from '@/components/SessionKeepAlive'
 import OAuthDeepLink from '@/components/OAuthDeepLink'
+import PushRegistration from '@/components/PushRegistration'
 
 const SITE_URL = 'https://vanute.com.au'
 
@@ -97,6 +98,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <SessionKeepAlive />
         {/* Catches the native OAuth (Google/Facebook/Apple) deep-link return (see component). */}
         <OAuthDeepLink />
+        {/* Registers every signed-in user (buyer or driver) for native push, so chat
+            messages and other alerts land as a real notification (see component). */}
+        <PushRegistration />
         {children}
       </body>
     </html>
