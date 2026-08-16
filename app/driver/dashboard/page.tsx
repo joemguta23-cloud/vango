@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Nav from '@/components/Nav'
 import { createSupabaseBrowserClient } from '@/lib/supabase'
-import { startDriverPresence, stopDriverPresence } from '@/lib/nativePresence'
+import { startDriverPresence, stopDriverPresence, openDriverLocationSettings } from '@/lib/nativePresence'
 import type { Job, Driver } from '@/types'
 
 const ITEM_ICONS: Record<string, string> = {
@@ -83,7 +83,10 @@ const [myJobs, setMyJobs] = useState<Job[]>([])
 const [loading, setLoading] = useState(true)
 const [toggling, setToggling] = useState(false)
 const [refreshing, setRefreshing] = useState(false)
-const [locationError, setLocationError] = useState<string | null>(null)
+// `native` tracks whether the denial happened inside the native app (in
+// which case we can offer a direct jump to the OS settings screen) or on
+// the plain website (where there's no such deep link to offer).
+const [locationError, setLocationError] = useState<{ message: string; native: boolean } | null>(null)
 
 useEffect(() => {
 loadData()
@@ -147,7 +150,7 @@ locationOk = await requestForegroundLocationOnce()
 }
 if (!locationOk) {
 setToggling(false)
-setLocationError(LOCATION_DENIED_MESSAGE)
+setLocationError({ message: LOCATION_DENIED_MESSAGE, native: presence.native })
 return
 }
 } else {
@@ -157,7 +160,7 @@ await stopDriverPresence()
 const { error } = await supabase.from('drivers').update({ is_online: goingOnline }).eq('id', driver.id)
 if (error) {
 setToggling(false)
-setLocationError('Something went wrong updating your status. Please try again.')
+setLocationError({ message: 'Something went wrong updating your status. Please try again.', native: false })
 return
 }
 setDriver(d => d ? { ...d, is_online: goingOnline } : d)
@@ -214,8 +217,14 @@ className="flex items-center gap-2 px-4 py-2.5 rounded-xl border font-semibold t
 </span>
 </div>
 {locationError && (
-<div className="mb-4 text-xs font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-300 rounded-xl px-3 py-2.5">
-⚠️ {locationError}
+<div className="mb-4 bg-amber-500/15 border border-amber-500/30 text-amber-300 rounded-xl px-3 py-2.5">
+<p className="text-xs font-semibold">⚠️ {locationError.message}</p>
+{locationError.native && (
+<button onClick={() => openDriverLocationSettings()}
+className="mt-2 text-xs font-bold bg-amber-400/20 hover:bg-amber-400/30 text-amber-200 px-3 py-1.5 rounded-lg transition-colors">
+Open location settings →
+</button>
+)}
 </div>
 )}
 <div className="grid grid-cols-3 gap-3 mt-4">
