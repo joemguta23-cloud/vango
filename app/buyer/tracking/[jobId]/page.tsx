@@ -36,6 +36,12 @@ const CANCELLABLE_STATUSES = ['unpaid', 'pending', 'accepted']
 // see /buyer/edit/[jobId]). No edits once the item is picked up.
 const EDITABLE_STATUSES = ['unpaid', 'pending', 'accepted']
 
+// A driver GPS ping older than this looks "live" but almost certainly isn't
+// -- the realtime socket or poll has silently stalled (backgrounded tab,
+// locked phone, dead connection) rather than the driver genuinely holding
+// still this long. Used to swap the "Live" badge for "Reconnecting…".
+const STALE_LOCATION_MS = 45000
+
 // Clean money display: never show floating-point junk like 21.990000000000002.
 const money = (n) => {
   const v = Math.round(Number(n) * 100) / 100
@@ -52,6 +58,11 @@ function timeAgo(iso) {
 
 function MapEmbed({ pickupLat, pickupLng, dropoffLat, dropoffLng, driverLat, driverLng, driverUpdatedAt }) {
   const hasDriver = driverLat != null && driverLng != null
+  // If the driver's last GPS ping is stale, the connection has likely
+  // dropped (backgrounded tab, dead socket) rather than the driver genuinely
+  // not moving -- show "Reconnecting…" instead of a falsely-calm "Live" so
+  // the buyer isn't misled into thinking the pin is current.
+  const isStale = hasDriver && driverUpdatedAt && (Date.now() - new Date(driverUpdatedAt).getTime()) > STALE_LOCATION_MS
   const lats = [pickupLat, dropoffLat, ...(hasDriver ? [driverLat] : [])]
   const lngs = [pickupLng, dropoffLng, ...(hasDriver ? [driverLng] : [])]
   const minLng = Math.min(...lngs) - 0.05
@@ -66,8 +77,9 @@ function MapEmbed({ pickupLat, pickupLng, dropoffLat, dropoffLng, driverLat, dri
         <span className="text-base">🗺️</span>
         <h2 className="font-bold text-sm text-slate-600">Route map</h2>
         {hasDriver && (
-          <span className="ml-auto flex items-center gap-1 text-xs font-semibold text-green-600">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Live
+          <span className={`ml-auto flex items-center gap-1 text-xs font-semibold ${isStale ? 'text-amber-600' : 'text-green-600'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isStale ? 'bg-amber-500' : 'bg-green-500'}`} />
+            {isStale ? 'Reconnecting…' : 'Live'}
           </span>
         )}
       </div>
@@ -158,6 +170,28 @@ export default function TrackingPage() {
     const interval = setInterval(fetchJob, 10000)
     return () => clearInterval(interval)
   }, [job?.status, jobId])
+
+  // Instant refresh when the tab/app regains focus after being backgrounded.
+  // Browsers (and iOS/Android when the app is backgrounded) throttle or
+  // fully pause timers and websockets in the background, so a buyer who
+  // leaves this page open in another tab -- or just locks their phone for a
+  // few minutes -- can come back to a driver pin that looks fine but hasn't
+  // actually moved in a while. Firing an immediate fetch the moment the page
+  // is visible again means they see the true current location without
+  // needing to know to hit refresh themselves.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') { fetchJob(); fetchEvents() }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    window.addEventListener('pageshow', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+      window.removeEventListener('pageshow', onVisible)
+    }
+  }, [jobId])
 
   // Call the driver. Numbers stay hidden from the page itself -- the server
   // route only hands out the other party's number to a job participant while
