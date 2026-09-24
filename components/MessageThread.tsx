@@ -6,7 +6,7 @@ import { createSupabaseBrowserClient } from '@/lib/supabase'
 // tracking page and the driver active-job page open this in a modal.
 // Access control is enforced by the job_messages RLS policies -- only the
 // job's buyer or assigned driver can read/send. Includes Block + Report
-// for user safety (records to chat_safety_actions for VanGo review).
+// for user safety (records to chat_safety_actions for Vanute review).
 //
 // Latency design (feels instant, no manual refresh needed):
 //  - Sending appends the message to the local list immediately (optimistic),
@@ -117,12 +117,12 @@ export default function MessageThread({ jobId, onClose }: { jobId: string; onClo
 
   const reportMessage = async (m: any) => {
     if (!userId) return
-    const reason = window.prompt('Report this message to VanGo. Briefly, what is wrong? (optional)')
+    const reason = window.prompt('Report this message to Vanute. Briefly, what is wrong? (optional)')
     if (reason === null) return // cancelled
     await supabase.from('chat_safety_actions').insert({
       job_id: jobId, actor_id: userId, target_user_id: m.sender_id, message_id: m.__optimistic ? null : m.id, action_type: 'report', note: reason || null,
     })
-    window.alert('Thanks -- this message has been reported to VanGo for review.')
+    window.alert('Thanks -- this message has been reported to Vanute for review.')
   }
 
   const blockUser = async () => {
@@ -152,7 +152,7 @@ export default function MessageThread({ jobId, onClose }: { jobId: string; onClo
             <p className="text-sm text-slate-400 text-center py-8">No messages yet -- say hi!</p>
           )}
           {blocked && (
-            <p className="text-sm text-slate-500 text-center py-6 bg-slate-50 rounded-xl">You have blocked this user. VanGo has been notified. Close this chat to continue.</p>
+            <p className="text-sm text-slate-500 text-center py-6 bg-slate-50 rounded-xl">You have blocked this user. Vanute has been notified. Close this chat to continue.</p>
           )}
           {!blocked && messages.map(m => (
             <div key={m.id} className={`flex ${m.sender_id === userId ? 'justify-end' : 'justify-start'}`}>
